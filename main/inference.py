@@ -94,18 +94,121 @@ def render_mesh_only(vertices, faces, cam_param, img_shape=(512, 512)):
         return color
         
     except Exception as e:
-        print(f"Mesh-only rendering failed: {e}")
-        # Fallback: create a simple visualization
-        img = np.zeros((img_shape[0], img_shape[1], 3), dtype=np.uint8)
-        # Project vertices to 2D and draw points
-        vertices_2d = vertices[:, :2]  # Simple projection
-        vertices_2d = ((vertices_2d + 1) * 0.5 * np.array([img_shape[1], img_shape[0]])).astype(int)
+        print(f"PyRender failed ({e}), using matplotlib wireframe fallback")
+        return render_mesh_matplotlib_fallback(vertices, faces, cam_param, img_shape)
+
+
+def render_mesh_matplotlib_fallback(vertices, faces, cam_param, img_shape=(512, 512)):
+    """Fallback mesh renderer using matplotlib for wireframe visualization"""
+    try:
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.mplot3d import Axes3D
+        from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+        import matplotlib
+        matplotlib.use('Agg')  # Use non-interactive backend
         
-        for v in vertices_2d:
-            if 0 <= v[0] < img_shape[1] and 0 <= v[1] < img_shape[0]:
-                cv2.circle(img, tuple(v), 1, (255, 255, 255), -1)
+        # Create 3D plot
+        fig = plt.figure(figsize=(img_shape[1]/100, img_shape[0]/100), dpi=100)
+        ax = fig.add_subplot(111, projection='3d')
         
-        return img
+        # Set the aspect ratio and viewing angle
+        ax.set_box_aspect([1,1,1])
+        
+        # Create mesh visualization - subsample faces for performance
+        num_faces = len(faces)
+        if num_faces > 1000:
+            # Subsample faces for better performance while maintaining shape
+            step = max(1, num_faces // 1000)
+            selected_faces = faces[::step]
+        else:
+            selected_faces = faces
+        
+        # Create face collection
+        face_vertices = vertices[selected_faces]
+        
+        # Create mesh with light blue color and some transparency
+        mesh = Poly3DCollection(face_vertices, alpha=0.7, facecolor='lightblue', 
+                               edgecolor='navy', linewidth=0.1)
+        ax.add_collection3d(mesh)
+        
+        # Set the limits based on the mesh bounds
+        ax.set_xlim([vertices[:, 0].min(), vertices[:, 0].max()])
+        ax.set_ylim([vertices[:, 1].min(), vertices[:, 1].max()])
+        ax.set_zlim([vertices[:, 2].min(), vertices[:, 2].max()])
+        
+        # Set viewing angle for better visualization
+        ax.view_init(elev=20, azim=45)
+        
+        # Remove axes for cleaner look
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_zticks([])
+        ax.grid(False)
+        
+        # Set background color
+        ax.xaxis.pane.fill = False
+        ax.yaxis.pane.fill = False
+        ax.zaxis.pane.fill = False
+        ax.xaxis.pane.set_edgecolor('w')
+        ax.yaxis.pane.set_edgecolor('w')
+        ax.zaxis.pane.set_edgecolor('w')
+        
+        # Save to buffer
+        fig.tight_layout(pad=0)
+        fig.canvas.draw()
+        
+        # Convert to numpy array
+        buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+        buf = buf.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        
+        plt.close(fig)
+        
+        # Resize if necessary
+        if buf.shape[:2] != img_shape:
+            import cv2
+            buf = cv2.resize(buf, (img_shape[1], img_shape[0]))
+        
+        return buf
+        
+    except Exception as e:
+        print(f"Matplotlib fallback failed ({e}), using simple wireframe")
+        return render_simple_wireframe(vertices, faces, img_shape)
+
+
+def render_simple_wireframe(vertices, faces, img_shape=(512, 512)):
+    """Simple wireframe renderer using OpenCV"""
+    # Create black background
+    img = np.zeros((img_shape[0], img_shape[1], 3), dtype=np.uint8)
+    
+    # Simple camera projection
+    # Center and scale the mesh
+    v_centered = vertices - vertices.mean(axis=0)
+    scale = min(img_shape) * 0.3 / (np.max(v_centered) - np.min(v_centered))
+    v_scaled = v_centered * scale
+    
+    # Project to 2D (simple orthographic projection)
+    v_2d = v_scaled[:, :2] + np.array([img_shape[1], img_shape[0]]) / 2
+    v_2d = v_2d.astype(int)
+    
+    # Draw edges - subsample for performance
+    num_faces = len(faces)
+    if num_faces > 500:
+        step = max(1, num_faces // 500)
+        selected_faces = faces[::step]
+    else:
+        selected_faces = faces
+    
+    # Draw wireframe
+    for face in selected_faces:
+        if all(0 <= v_2d[face[i]][0] < img_shape[1] and 
+               0 <= v_2d[face[i]][1] < img_shape[0] for i in range(3)):
+            # Draw triangle edges
+            for i in range(3):
+                pt1 = tuple(v_2d[face[i]])
+                pt2 = tuple(v_2d[face[(i + 1) % 3]])
+                cv2.line(img, pt1, pt2, (0, 255, 255), 1)  # Cyan wireframe
+    
+    return img
 
 
 def parse_args():
