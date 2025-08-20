@@ -118,12 +118,33 @@ if ! command -v ffmpeg &> /dev/null; then
     exit 1
 fi
 
-# Check Python dependencies
-python -c "import torch; import cv2; import ultralytics; import smplx" 2>/dev/null || {
-    print_error "Missing Python dependencies"
-    print_warning "Run: pip install -r requirements.txt"
-    exit 1
-}
+# Check Python dependencies - try multiple Python commands
+PYTHON_CMD=""
+for cmd in python python3 /usr/bin/python3 /opt/homebrew/bin/python3 /opt/homebrew/bin/python3.11 /opt/homebrew/bin/python3.12; do
+    if command -v $cmd >/dev/null 2>&1; then
+        if $cmd -c "import torch; import cv2; import ultralytics; import smplx" 2>/dev/null; then
+            PYTHON_CMD=$cmd
+            print_status "Python dependencies verified with: $PYTHON_CMD"
+            break
+        fi
+    fi
+done
+
+if [ -z "$PYTHON_CMD" ]; then
+    # Try to find any working Python command, even without all dependencies
+    for cmd in python python3 /usr/bin/python3 /opt/homebrew/bin/python3 /opt/homebrew/bin/python3.11; do
+        if command -v $cmd >/dev/null 2>&1; then
+            PYTHON_CMD=$cmd
+            print_warning "Using $PYTHON_CMD (dependencies not verified)"
+            break
+        fi
+    done
+    
+    if [ -z "$PYTHON_CMD" ]; then
+        print_error "No Python interpreter found"
+        exit 1
+    fi
+fi
 
 print_status "Pre-flight checks passed"
 
@@ -169,7 +190,7 @@ timeout_duration=600  # 10 minutes
 # Store inference result but continue processing
 inference_success=0
 if command -v timeout &> /dev/null; then
-    timeout $timeout_duration python main/inference.py \
+    timeout $timeout_duration $PYTHON_CMD main/inference.py \
         --num_gpus 1 \
         --file_name "$NAME" \
         --ckpt_name "$CKPT_NAME" \
@@ -181,7 +202,7 @@ if command -v timeout &> /dev/null; then
     || print_warning "⚠️ Inference completed with errors but checking for partial results..."
 else
     # Fallback for systems without timeout command
-    python main/inference.py \
+    $PYTHON_CMD main/inference.py \
         --num_gpus 1 \
         --file_name "$NAME" \
         --ckpt_name "$CKPT_NAME" \
