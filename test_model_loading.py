@@ -54,14 +54,14 @@ def test_model_integration():
             expression=expression, transl=transl
         )
         
-        print(f"✅ Forward pass successful:")
+        print("✅ Forward pass successful:")
         print(f"   Vertices shape: {output.vertices.shape}")
         print(f"   Joints shape: {output.joints.shape}")
         
         # Test copy.deepcopy compatibility (used in SMPLest_X.py)
         print("\n4. Testing deepcopy compatibility...")
         import copy
-        copied_layer = copy.deepcopy(layer)
+        copy.deepcopy(layer)  # Test deepcopy functionality
         print("✅ Deepcopy successful")
         
         # Test device movement

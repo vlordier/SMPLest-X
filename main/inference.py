@@ -7,16 +7,23 @@ import torch.backends.cudnn as cudnn
 import torch
 import cv2
 import datetime
+import time
+import logging
 from tqdm import tqdm
 from pathlib import Path
+from typing import List, Dict, Optional
 from human_models.human_models import SMPLX
 from ultralytics import YOLO
 from main.base import Tester
 from main.config import Config
 from utils.data_utils import load_img, process_bbox, generate_patch_image
-from utils.visualization_utils import render_mesh
-from utils.inference_utils import non_max_suppression
-from utils.device_utils import get_device, get_device_name, to_device
+from utils.visualization_utils import render_mesh, render_mesh_improved
+from utils.device_utils import get_device_name, to_device
+from utils.validation_models import (
+    InferenceConfig, DetectionResult, SMPLXParameters, MeshData, 
+    InferenceOutput, ValidationLogger, validate_tensor_output, 
+    validate_numpy_array, MeshFormat
+)
 
 
 def save_mesh_obj(vertices, faces, filepath):
@@ -101,11 +108,13 @@ def render_mesh_only(vertices, faces, cam_param, img_shape=(512, 512)):
 def render_mesh_matplotlib_fallback(vertices, faces, cam_param, img_shape=(512, 512)):
     """Fallback mesh renderer using matplotlib for wireframe visualization"""
     try:
-        import matplotlib.pyplot as plt
-        from mpl_toolkits.mplot3d import Axes3D
-        from mpl_toolkits.mplot3d.art3d import Poly3DCollection
         import matplotlib
-        matplotlib.use('Agg')  # Use non-interactive backend
+        matplotlib.use('Agg')  # Use non-interactive backend BEFORE importing pyplot
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+        
+        # Set maximum number of figures to prevent memory warnings
+        plt.rcParams['figure.max_open_warning'] = 0
         
         # Create 3D plot
         fig = plt.figure(figsize=(img_shape[1]/100, img_shape[0]/100), dpi=100)
@@ -157,11 +166,16 @@ def render_mesh_matplotlib_fallback(vertices, faces, cam_param, img_shape=(512, 
         fig.tight_layout(pad=0)
         fig.canvas.draw()
         
-        # Convert to numpy array
-        buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-        buf = buf.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        # Convert to numpy array using new API
+        fig.canvas.draw()
+        buf = np.asarray(fig.canvas.buffer_rgba())
+        # Convert RGBA to RGB by removing alpha channel
+        buf = buf[:, :, :3]
         
         plt.close(fig)
+        # Clear any remaining matplotlib references to prevent memory leaks
+        import gc
+        gc.collect()
         
         # Resize if necessary
         if buf.shape[:2] != img_shape:
@@ -213,21 +227,203 @@ def render_simple_wireframe(vertices, faces, img_shape=(512, 512)):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--num_gpus', type=int, dest='num_gpus')
+    parser.add_argument('--num_gpus', type=int, dest='num_gpus', default=1)
     parser.add_argument('--file_name', type=str, default='test')
     parser.add_argument('--ckpt_name', type=str, default='model_dump')
-    parser.add_argument('--start', type=str, default=1)
-    parser.add_argument('--end', type=str, default=1)
+    parser.add_argument('--start', type=str, default='1')
+    parser.add_argument('--end', type=str, default='1')
     parser.add_argument('--multi_person', action='store_true')
     parser.add_argument('--save_meshes', action='store_true', help='Save 3D meshes in OBJ format')
     parser.add_argument('--save_mesh_renders', action='store_true', help='Save isolated mesh renders without background')
     parser.add_argument('--mesh_format', type=str, default='obj', choices=['obj', 'ply'], help='Mesh file format')
+    # Optional validation parameters
+    parser.add_argument('--gpu', type=int, default=0, help='GPU ID to use')
+    parser.add_argument('--bbox_thr', type=float, default=0.9, help='Bounding box threshold')
+    parser.add_argument('--fps', type=int, help='Frame rate for video processing')
     args = parser.parse_args()
     return args
+
+def validate_and_process_detections(yolo_results, frame_id: int, confidence_threshold: float = 0.5) -> List[DetectionResult]:
+    """Validate and convert YOLO detections to DetectionResult objects"""
+    detections: List[DetectionResult] = []
+    
+    if not hasattr(yolo_results, 'boxes') or yolo_results.boxes is None:
+        logging.warning(f"Frame {frame_id}: No detection boxes found")
+        return detections
+    
+    try:
+        boxes = yolo_results.boxes.xyxy.detach().cpu().numpy()
+        confidences = yolo_results.boxes.conf.detach().cpu().numpy() if yolo_results.boxes.conf is not None else None
+        
+        validate_numpy_array(boxes, f"Frame {frame_id} boxes")
+        
+        for person_id, bbox in enumerate(boxes):
+            confidence = confidences[person_id] if confidences is not None else 1.0
+            
+            if confidence < confidence_threshold:
+                continue
+                
+            try:
+                detection = DetectionResult(
+                    person_id=person_id,
+                    bbox=bbox.tolist(),
+                    confidence=float(confidence),
+                    frame_id=frame_id
+                )
+                detections.append(detection)
+                
+            except Exception as e:
+                logging.error(f"Frame {frame_id}, Person {person_id}: Detection validation failed - {e}")
+                
+    except Exception as e:
+        logging.error(f"Frame {frame_id}: Failed to process detections - {e}")
+    
+    return detections
+
+def validate_and_convert_smplx_params(smplx_output: Dict, person_id: int, frame_id: int) -> Optional[SMPLXParameters]:
+    """Validate and convert model outputs to SMPLXParameters"""
+    try:
+        # Validate tensor outputs first
+        for key, tensor in smplx_output.items():
+            if isinstance(tensor, torch.Tensor):
+                validate_tensor_output(tensor, f"Frame {frame_id}, Person {person_id}, {key}")
+        
+        # Convert to SMPLXParameters
+        params = SMPLXParameters(
+            betas=smplx_output.get('betas', torch.zeros(10)).detach().cpu().numpy().tolist(),
+            body_pose=smplx_output.get('body_pose', torch.zeros(63)).detach().cpu().numpy().flatten().tolist(),
+            global_orient=smplx_output.get('global_orient', torch.zeros(3)).detach().cpu().numpy().flatten().tolist(),
+            left_hand_pose=smplx_output.get('left_hand_pose', torch.zeros(45)).detach().cpu().numpy().flatten().tolist() if 'left_hand_pose' in smplx_output else None,
+            right_hand_pose=smplx_output.get('right_hand_pose', torch.zeros(45)).detach().cpu().numpy().flatten().tolist() if 'right_hand_pose' in smplx_output else None,
+            jaw_pose=smplx_output.get('jaw_pose', torch.zeros(3)).detach().cpu().numpy().flatten().tolist() if 'jaw_pose' in smplx_output else None,
+            leye_pose=smplx_output.get('leye_pose', torch.zeros(3)).detach().cpu().numpy().flatten().tolist() if 'leye_pose' in smplx_output else None,
+            reye_pose=smplx_output.get('reye_pose', torch.zeros(3)).detach().cpu().numpy().flatten().tolist() if 'reye_pose' in smplx_output else None,
+            expression=smplx_output.get('expression', torch.zeros(10)).detach().cpu().numpy().flatten().tolist() if 'expression' in smplx_output else None,
+            transl=smplx_output.get('transl', torch.zeros(3)).detach().cpu().numpy().flatten().tolist()
+        )
+        
+        return params
+        
+    except Exception as e:
+        logging.error(f"Frame {frame_id}, Person {person_id}: SMPL-X parameter validation failed - {e}")
+        return None
+
+def validate_and_convert_mesh(vertices: np.ndarray, faces: np.ndarray, person_id: int, frame_id: int) -> Optional[MeshData]:
+    """Validate and convert mesh data to MeshData object"""
+    try:
+        # Validate inputs
+        validate_numpy_array(vertices, f"Frame {frame_id}, Person {person_id} vertices", expected_shape=(None, 3))
+        validate_numpy_array(faces, f"Frame {frame_id}, Person {person_id} faces", expected_shape=(None, 3))
+        
+        mesh = MeshData(
+            vertices=vertices.tolist(),
+            faces=faces.tolist(),
+            person_id=person_id,
+            frame_id=frame_id
+        )
+        
+        return mesh
+        
+    except Exception as e:
+        logging.error(f"Frame {frame_id}, Person {person_id}: Mesh validation failed - {e}")
+        return None
+
+def save_mesh_with_validation(mesh: MeshData, mesh_format: str, output_folder: Path) -> List[Path]:
+    """Save mesh with validation and return saved file paths"""
+    saved_files = []
+    
+    try:
+        filename_base = f"{mesh.frame_id:06d}_person{mesh.person_id}"
+        
+        if mesh_format.lower() == 'obj':
+            filepath = output_folder / f"{filename_base}.obj"
+            save_mesh_obj(np.array(mesh.vertices), np.array(mesh.faces), filepath)
+            saved_files.append(filepath)
+            
+        elif mesh_format.lower() == 'ply':
+            filepath = output_folder / f"{filename_base}.ply"
+            save_mesh_ply(np.array(mesh.vertices), np.array(mesh.faces), filepath)
+            saved_files.append(filepath)
+            
+        # Validate file was actually created
+        for filepath in saved_files:
+            if not filepath.exists() or filepath.stat().st_size == 0:
+                logging.error(f"Failed to save mesh file: {filepath}")
+                saved_files.remove(filepath)
+            else:
+                logging.info(f"💾 Saved mesh: {filepath.name}")
+                
+    except Exception as e:
+        logging.error(f"Mesh save failed for frame {mesh.frame_id}, person {mesh.person_id}: {e}")
+        
+    return saved_files
+
+def save_mesh_render_with_validation(mesh: MeshData, cam_param: Dict, output_folder: Path) -> List[Path]:
+    """Save mesh render with validation and return saved file paths"""
+    saved_files = []
+    
+    try:
+        filename = f"{mesh.frame_id:06d}_person{mesh.person_id}_mesh.jpg"
+        filepath = output_folder / filename
+        
+        # Create a dummy image for rendering (not used, kept for future implementation)
+        
+        # Render mesh
+        render_img = render_mesh_only(
+            vertices=np.array(mesh.vertices),
+            faces=np.array(mesh.faces),
+            cam_param=cam_param,
+            img_shape=(512, 512)
+        )
+        
+        if render_img is not None:
+            cv2.imwrite(str(filepath), render_img)
+            
+            # Validate file was created and has reasonable size
+            if filepath.exists() and filepath.stat().st_size > 1000:  # At least 1KB
+                saved_files.append(filepath)
+                logging.info(f"🎨 Saved mesh render: {filepath.name}")
+            else:
+                logging.error(f"Render file too small or missing: {filepath}")
+        else:
+            logging.error(f"Failed to render mesh for frame {mesh.frame_id}, person {mesh.person_id}")
+            
+    except Exception as e:
+        logging.error(f"Mesh render save failed for frame {mesh.frame_id}, person {mesh.person_id}: {e}")
+        
+    return saved_files
 
 def main():
     args = parse_args()
     cudnn.benchmark = True
+    
+    # Initialize validation logger
+    validation_logger = ValidationLogger(Path("inference_validation.log"))
+    
+    try:
+        # Validate and create configuration
+        root_dir = Path(__file__).resolve().parent.parent
+        config = InferenceConfig(
+            input_path=Path(f"demo/{args.file_name}.mp4"),  # Assumed input location
+            output_folder=Path(f"demo/output_frames/{args.file_name}"),
+            model_path=Path(f"./pretrained_models/{args.ckpt_name}/{args.ckpt_name}.pth.tar"),
+            gpu=getattr(args, 'gpu', 0),
+            bbox_thr=getattr(args, 'bbox_thr', 0.9),
+            fps=getattr(args, 'fps', None),
+            save_meshes=args.save_meshes,
+            save_mesh_renders=args.save_mesh_renders,
+            mesh_format=MeshFormat(args.mesh_format),
+            device=None  # Will be set later
+        )
+        
+        validation_logger.log_config_validation(config)
+        
+    except Exception as e:
+        logging.error(f"Configuration validation failed: {e}")
+        return
+    
+    # Store all inference outputs for final validation
+    all_outputs: List[InferenceOutput] = []
 
     # init config
     time_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -271,7 +467,7 @@ def main():
 
     # init tester
     demoer = Tester(cfg)
-    demoer.logger.info(f"Using 1 GPU.")
+    demoer.logger.info("Using 1 GPU.")
     demoer.logger.info(f'Inference [{args.file_name}] with [{cfg.model.pretrained_model_path}].')
     demoer._make_model()
 
@@ -284,121 +480,259 @@ def main():
     end = int(args.end) + 1
 
     for frame in tqdm(range(start, end)):
+        frame_start_time = time.time()
         
-        # prepare input image
-        img_path =osp.join(img_folder, f'{int(frame):06d}.jpg')
-
-        transform = transforms.ToTensor()
-        original_img = load_img(img_path)
-        vis_img = original_img.copy()
-        original_img_height, original_img_width = original_img.shape[:2]
+        # Initialize frame output
+        frame_output = InferenceOutput(
+            frame_id=frame,
+            detections=[],
+            smplx_params={},
+            meshes={},
+            mesh_files_saved={},
+            render_files_saved={},
+            processing_time=0.0
+        )
         
-        # detection, xyxy
-        device_name = get_device_name()
-        yolo_bbox = detector.predict(original_img, 
-                                device=device_name, 
-                                classes=00, 
-                                conf=cfg.inference.detection.conf, 
-                                save=cfg.inference.detection.save, 
-                                verbose=cfg.inference.detection.verbose
-                                    )[0].boxes.xyxy.detach().cpu().numpy()
-
-        if len(yolo_bbox)<1:
-            # save original image if no bbox
-            num_bbox = 0
-        if not args.multi_person:
-            # only select the largest bbox
-            num_bbox = 1
-            # yolo_bbox = yolo_bbox[0]
-        else:
-            # keep bbox by NMS with iou_thr
-            yolo_bbox = non_max_suppression(yolo_bbox, cfg.inference.detection.iou_thr)
-            num_bbox = len(yolo_bbox)
-
-        # loop all detected bboxes
-        for bbox_id in range(num_bbox):
-            yolo_bbox_xywh = np.zeros((4))
-            yolo_bbox_xywh[0] = yolo_bbox[bbox_id][0]
-            yolo_bbox_xywh[1] = yolo_bbox[bbox_id][1]
-            yolo_bbox_xywh[2] = abs(yolo_bbox[bbox_id][2] - yolo_bbox[bbox_id][0])
-            yolo_bbox_xywh[3] = abs(yolo_bbox[bbox_id][3] - yolo_bbox[bbox_id][1])
+        try:
+            # prepare input image
+            img_path = osp.join(img_folder, f'{int(frame):06d}.jpg')
             
-            # xywh
-            bbox = process_bbox(bbox=yolo_bbox_xywh, 
-                                img_width=original_img_width, 
-                                img_height=original_img_height, 
-                                input_img_shape=cfg.model.input_img_shape, 
-                                ratio=getattr(cfg.data, "bbox_ratio", 1.25))                
-            img, _, _ = generate_patch_image(cvimg=original_img, 
-                                                bbox=bbox, 
-                                                scale=1.0, 
-                                                rot=0.0, 
-                                                do_flip=False, 
-                                                out_shape=cfg.model.input_img_shape)
-                
-            img = transform(img.astype(np.float32))/255
-            img = to_device(img)[None,:,:,:]
-            inputs = {'img': img}
-            targets = {}
-            meta_info = {}
+            # Validate image path exists
+            if not os.path.exists(img_path):
+                logging.error(f"Frame {frame}: Image file not found - {img_path}")
+                continue
 
-            # mesh recovery
-            with torch.no_grad():
-                out = demoer.model(inputs, targets, meta_info, 'test')
+            transform = transforms.ToTensor()
+            original_img = load_img(img_path)
+            vis_img = original_img.copy()
+            original_img_height, original_img_width = original_img.shape[:2]
+            
+            # Validate image loaded properly
+            validate_numpy_array(original_img, f"Frame {frame} input image", expected_shape=(None, None, 3))
+            
+            # detection, xyxy
+            device_name = get_device_name()
+            logging.info(f"Frame {frame}: Running detection on device {device_name}")
+            
+            yolo_results = detector.predict(original_img, 
+                                        device=device_name, 
+                                        classes=0,  # person class
+                                        conf=cfg.inference.detection.conf, 
+                                        save=cfg.inference.detection.save, 
+                                        verbose=cfg.inference.detection.verbose
+                                        )[0]
+            
+            # Validate and process detections
+            detections = validate_and_process_detections(
+                yolo_results, 
+                frame_id=frame, 
+                confidence_threshold=cfg.inference.detection.conf
+            )
+            
+            frame_output.detections = detections
+            validation_logger.log_frame_processing(frame, detections)
+            
+            if not detections:
+                logging.warning(f"Frame {frame}: No valid detections found")
+                frame_output.processing_time = time.time() - frame_start_time
+                all_outputs.append(frame_output)
+                continue
+            
+            # Process each detection
+            for detection in detections:
+                person_id = detection.person_id
+                bbox = detection.bbox
+                
+                try:
+                    # Convert bbox format for processing
+                    yolo_bbox_xywh = np.array([
+                        bbox[0],  # x1
+                        bbox[1],  # y1  
+                        bbox[2] - bbox[0],  # width
+                        bbox[3] - bbox[1]   # height
+                    ])
+                    
+                    # Process bbox for model input
+                    processed_bbox = process_bbox(
+                        bbox=yolo_bbox_xywh, 
+                        img_width=original_img_width, 
+                        img_height=original_img_height, 
+                        input_img_shape=cfg.model.input_img_shape, 
+                        ratio=getattr(cfg.data, "bbox_ratio", 1.25)
+                    )
+                    
+                    # Validate processed bbox
+                    validate_numpy_array(processed_bbox, f"Frame {frame}, Person {person_id} processed bbox", expected_shape=(4,))
+                    
+                    # Generate patch image for model input
+                    img, _, _ = generate_patch_image(
+                        cvimg=original_img, 
+                        bbox=processed_bbox, 
+                        scale=1.0, 
+                        rot=0.0, 
+                        do_flip=False, 
+                        out_shape=cfg.model.input_img_shape
+                    )
+                    
+                    # Validate patch image
+                    validate_numpy_array(img, f"Frame {frame}, Person {person_id} patch image")
+                    
+                    # Prepare model inputs
+                    img_tensor = transform(img.astype(np.float32))/255
+                    img_tensor = to_device(img_tensor)[None,:,:,:]
+                    
+                    # Validate tensor input
+                    validate_tensor_output(img_tensor, f"Frame {frame}, Person {person_id} input tensor", expected_shape=(1, 3, cfg.model.input_img_shape[0], cfg.model.input_img_shape[1]))
+                    
+                    inputs = {'img': img_tensor}
+                    targets = {}
+                    meta_info = {}
 
-            mesh = out['smplx_mesh_cam'].detach().cpu().numpy()[0]
-            
-            # Save mesh if requested
-            frame_name_no_ext = os.path.splitext(os.path.basename(img_path))[0]
-            
-            if args.save_meshes:
-                mesh_filename = f"{frame_name_no_ext}_person{bbox_id}.{args.mesh_format}"
-                mesh_path = os.path.join(mesh_folder, mesh_filename)
-                
-                if args.mesh_format == 'obj':
-                    save_mesh_obj(mesh, smpl_x.face, mesh_path)
-                elif args.mesh_format == 'ply':
-                    save_mesh_ply(mesh, smpl_x.face, mesh_path)
-                
-                print(f"💾 Saved mesh: {mesh_filename}")
-            
-            if args.save_mesh_renders:
-                mesh_render_filename = f"{frame_name_no_ext}_person{bbox_id}_mesh.jpg"
-                mesh_render_path = os.path.join(mesh_render_folder, mesh_render_filename)
-                
-                # Create camera parameters for isolated mesh rendering
-                cam_param = {'focal': [cfg.model.focal[0] / cfg.model.input_body_shape[1] * bbox[2], 
-                                     cfg.model.focal[1] / cfg.model.input_body_shape[0] * bbox[3]],
-                           'princpt': [cfg.model.princpt[0] / cfg.model.input_body_shape[1] * bbox[2] + bbox[0], 
-                                     cfg.model.princpt[1] / cfg.model.input_body_shape[0] * bbox[3] + bbox[1]]}
-                
-                # Render isolated mesh
-                mesh_render = render_mesh_only(mesh, smpl_x.face, cam_param)
-                cv2.imwrite(mesh_render_path, mesh_render[:, :, ::-1])  # Convert RGB to BGR for OpenCV
-                print(f"🎨 Saved mesh render: {mesh_render_filename}")
+                    # SMPL-X mesh recovery
+                    logging.info(f"Frame {frame}, Person {person_id}: Running SMPL-X inference")
+                    with torch.no_grad():
+                        model_output = demoer.model(inputs, targets, meta_info, 'test')
+                    
+                    # Validate model outputs
+                    if 'smplx_mesh_cam' not in model_output:
+                        logging.error(f"Frame {frame}, Person {person_id}: No mesh output from model")
+                        continue
+                    
+                    mesh_tensor = model_output['smplx_mesh_cam']
+                    validate_tensor_output(mesh_tensor, f"Frame {frame}, Person {person_id} mesh tensor")
+                    
+                    mesh_vertices = mesh_tensor.detach().cpu().numpy()[0]
+                    mesh_faces = smpl_x.face
+                    
+                    # Validate and convert SMPL-X parameters
+                    smplx_params = validate_and_convert_smplx_params(
+                        model_output, person_id, frame
+                    )
+                    if smplx_params:
+                        frame_output.smplx_params[person_id] = smplx_params
+                        validation_logger.log_smplx_generation(frame, person_id, smplx_params)
+                    
+                    # Validate and convert mesh data
+                    mesh_data = validate_and_convert_mesh(
+                        mesh_vertices, mesh_faces, person_id, frame
+                    )
+                    if mesh_data:
+                        frame_output.meshes[person_id] = mesh_data
+                        validation_logger.log_mesh_generation(frame, person_id, mesh_data)
+                        
+                        # Save mesh files if requested
+                        if args.save_meshes and mesh_folder:
+                            saved_mesh_files = save_mesh_with_validation(
+                                mesh_data, args.mesh_format, Path(mesh_folder)
+                            )
+                            frame_output.mesh_files_saved[person_id] = saved_mesh_files
+                        
+                        # Save mesh renders if requested
+                        if args.save_mesh_renders and mesh_render_folder:
+                            # Create camera parameters for isolated mesh rendering
+                            cam_param = {
+                                'focal': [
+                                    cfg.model.focal[0] / cfg.model.input_body_shape[1] * processed_bbox[2], 
+                                    cfg.model.focal[1] / cfg.model.input_body_shape[0] * processed_bbox[3]
+                                ],
+                                'princpt': [
+                                    cfg.model.princpt[0] / cfg.model.input_body_shape[1] * processed_bbox[2] + processed_bbox[0], 
+                                    cfg.model.princpt[1] / cfg.model.input_body_shape[0] * processed_bbox[3] + processed_bbox[1]
+                                ]
+                            }
+                            
+                            saved_render_files = save_mesh_render_with_validation(
+                                mesh_data, cam_param, Path(mesh_render_folder)
+                            )
+                            frame_output.render_files_saved[person_id] = saved_render_files
+                        
+                        # Log file operations
+                        validation_logger.log_file_operations(
+                            frame, person_id,
+                            frame_output.mesh_files_saved.get(person_id, []),
+                            frame_output.render_files_saved.get(person_id, [])
+                        )
 
-            # render mesh
-            focal = [cfg.model.focal[0] / cfg.model.input_body_shape[1] * bbox[2], 
-                     cfg.model.focal[1] / cfg.model.input_body_shape[0] * bbox[3]]
-            princpt = [cfg.model.princpt[0] / cfg.model.input_body_shape[1] * bbox[2] + bbox[0], 
-                       cfg.model.princpt[1] / cfg.model.input_body_shape[0] * bbox[3] + bbox[1]]
+                        # Render mesh on visualization image
+                        try:
+                            focal = [
+                                cfg.model.focal[0] / cfg.model.input_body_shape[1] * processed_bbox[2], 
+                                cfg.model.focal[1] / cfg.model.input_body_shape[0] * processed_bbox[3]
+                            ]
+                            princpt = [
+                                cfg.model.princpt[0] / cfg.model.input_body_shape[1] * processed_bbox[2] + processed_bbox[0], 
+                                cfg.model.princpt[1] / cfg.model.input_body_shape[0] * processed_bbox[3] + processed_bbox[1]
+                            ]
+                            
+                            # Draw the bbox on img
+                            vis_img = cv2.rectangle(vis_img, (int(bbox[0]), int(bbox[1])), 
+                                                    (int(bbox[2]), int(bbox[3])), (0, 255, 0), 2)
+                            
+                            # Draw mesh with improved Mac-compatible rendering
+                            try:
+                                vis_img = render_mesh(vis_img, mesh_vertices, mesh_faces, 
+                                                    {'focal': focal, 'princpt': princpt}, 
+                                                    mesh_as_vertices=False)
+                            except Exception as render_error:
+                                logging.warning(f"PyRender failed ({render_error}), using improved wireframe fallback")
+                                # Use improved wireframe rendering
+                                try:
+                                    vis_img = render_mesh_improved(vis_img, mesh_vertices, mesh_faces,
+                                                                 {'focal': focal, 'princpt': princpt})
+                                except Exception as wireframe_error:
+                                    logging.error(f"Wireframe rendering also failed: {wireframe_error}")
+                                    # Last fallback: just draw vertices as points
+                                    vis_img = render_mesh(vis_img, mesh_vertices, mesh_faces, 
+                                                        {'focal': focal, 'princpt': princpt}, 
+                                                        mesh_as_vertices=True)
+                        except Exception as viz_error:
+                            logging.error(f"Visualization rendering failed: {viz_error}")
+                    else:
+                        logging.error(f"Frame {frame}, Person {person_id}: Failed to validate mesh data")
+                        
+                except Exception as person_error:
+                    logging.error(f"Frame {frame}, Person {person_id}: Processing failed - {person_error}")
+                    continue
             
-            # draw the bbox on img
-            vis_img = cv2.rectangle(vis_img, (int(yolo_bbox[bbox_id][0]), int(yolo_bbox[bbox_id][1])), 
-                                    (int(yolo_bbox[bbox_id][2]), int(yolo_bbox[bbox_id][3])), (0, 255, 0), 1)
-            # draw mesh with OpenGL fallback for Mac compatibility
-            try:
-                vis_img = render_mesh(vis_img, mesh, smpl_x.face, {'focal': focal, 'princpt': princpt}, mesh_as_vertices=False)
-            except Exception as e:
-                if 'OpenGL' in str(e) or 'EGL' in str(e) or 'pyrender' in str(e):
-                    print(f"OpenGL rendering failed, using vertex projection fallback: {e}")
-                    vis_img = render_mesh(vis_img, mesh, smpl_x.face, {'focal': focal, 'princpt': princpt}, mesh_as_vertices=True)
-                else:
-                    raise
-
-        # save rendered image
-        frame_name = os.path.basename(img_path)
-        cv2.imwrite(os.path.join(output_folder, frame_name), vis_img[:, :, ::-1])
+            # Save visualization image
+            frame_name = os.path.basename(img_path)
+            vis_output_path = os.path.join(output_folder, frame_name)
+            cv2.imwrite(vis_output_path, vis_img[:, :, ::-1])
+            
+            # Record processing time
+            frame_output.processing_time = time.time() - frame_start_time
+            all_outputs.append(frame_output)
+            
+        except Exception as frame_error:
+            logging.error(f"Frame {frame}: Processing failed - {frame_error}")
+            frame_output.processing_time = time.time() - frame_start_time
+            all_outputs.append(frame_output)
+            continue
+    
+    # Final validation and summary
+    try:
+        validation_logger.log_inference_summary(all_outputs)
+        
+        # Save validation results
+        output_summary = {
+            'total_frames': len(all_outputs),
+            'successful_frames': len([out for out in all_outputs if out.detections]),
+            'total_detections': sum(len(out.detections) for out in all_outputs),
+            'total_meshes': sum(len(out.meshes) for out in all_outputs),
+            'total_processing_time': sum(out.processing_time for out in all_outputs),
+            'config': config.model_dump()
+        }
+        
+        # Save summary to JSON
+        import json
+        summary_path = Path(output_folder) / "inference_summary.json"
+        with open(summary_path, 'w') as f:
+            json.dump(output_summary, f, indent=2, default=str)
+        
+        logging.info(f"Inference completed successfully. Summary saved to: {summary_path}")
+        
+    except Exception as e:
+        logging.error(f"Failed to save final summary: {e}")
 
 
 if __name__ == "__main__":

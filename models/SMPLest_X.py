@@ -1,16 +1,13 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-import cv2
 import math
 import copy
 from models.module import TransformerDecoderHead, ViT
 from models.loss import CoordLoss, ParamLoss
-from human_models.human_models import SMPL, SMPLX
 from human_models.pytorch3d_smplx import Direct_SMPLX
-from utils.transforms import rot6d_to_axis_angle, batch_rodrigues, rot6d_to_rotmat
-from utils.data_utils import load_img
-from utils.device_utils import get_device, to_device
+from utils.transforms import rot6d_to_axis_angle, batch_rodrigues
+from utils.device_utils import to_device
 
 
 class Model(nn.Module):
@@ -165,9 +162,6 @@ class Model(nn.Module):
 
         # get transl
         body_trans = self.get_camera_trans(pred_mano_params['body_cam'])
-        lhand_trans = self.get_camera_trans(pred_mano_params['lhand_cam'])
-        rhand_trans = self.get_camera_trans(pred_mano_params['rhand_cam'])
-        face_trans = self.get_camera_trans(pred_mano_params['face_cam'])
 
         # convert predicted rot6d to aa (not unique convention may cause problem)
         root_pose_aa = rot6d_to_axis_angle(pred_mano_params['body_root_pose'])
@@ -178,7 +172,6 @@ class Model(nn.Module):
         lhand_pose_aa= rot6d_to_axis_angle(pred_mano_params['lhand_pose'].reshape(-1, 6)).reshape(pred_mano_params['lhand_pose'].shape[0], -1)  
         rhand_pose_aa= rot6d_to_axis_angle(pred_mano_params['rhand_pose'].reshape(-1, 6)).reshape(pred_mano_params['rhand_pose'].shape[0], -1)
         
-        face_root_pose = rot6d_to_axis_angle(pred_mano_params['face_root_pose'])
         face_jaw_pose_aa = rot6d_to_axis_angle(pred_mano_params['face_jaw_pose'])
         
         # convert predicted aa to rotmat 
@@ -191,7 +184,6 @@ class Model(nn.Module):
         lhand_pose_rotmat = batch_rodrigues(lhand_pose_aa.reshape(-1, 3)).reshape(lhand_pose_aa.shape[0], -1) 
         rhand_pose_rotmat = batch_rodrigues(rhand_pose_aa.reshape(-1, 3)).reshape(rhand_pose_aa.shape[0], -1)  
 
-        face_root_rotmat = batch_rodrigues(face_root_pose.reshape(-1, 3)).reshape(face_root_pose.shape[0], -1)
         face_jaw_pose_rotmat = batch_rodrigues(face_jaw_pose_aa.reshape(-1, 3)).reshape(face_jaw_pose_aa.shape[0], -1)  
 
         pose = torch.cat((root_pose_rotmat, body_pose_rotmat, lhand_pose_rotmat, rhand_pose_rotmat, face_jaw_pose_rotmat), 1)

@@ -40,7 +40,7 @@ def check_pytorch():
             device = "cpu"
             
         # Test device functionality
-        test_tensor = torch.tensor([1.0, 2.0]).to(device)
+        torch.tensor([1.0, 2.0]).to(device)  # Test device access
         print(f"   ✅ Device '{device}' working correctly")
         return True, device
         
@@ -190,7 +190,7 @@ def check_mac_specific():
             print(f"   ✅ macOS {version}")
         else:
             print("   ⚠️  Could not determine macOS version")
-    except:
+    except Exception:
         print("   ⚠️  Could not check macOS version")
     
     # Check for common Mac issues

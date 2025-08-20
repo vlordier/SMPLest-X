@@ -13,11 +13,10 @@ from models.SMPLest_X import get_model
 
 # ddp
 import torch.cuda
-import torch.distributed as dist
 from torch.utils.data import DistributedSampler
 import torch.utils.data.distributed
 from utils.distribute_utils import (
-    get_rank, is_main_process, time_synchronized, get_group_idx, get_process_groups, get_dist_info
+    is_main_process, get_dist_info
 )
 from utils.device_utils import get_device, to_device, empty_cache
 

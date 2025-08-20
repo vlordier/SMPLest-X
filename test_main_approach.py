@@ -11,7 +11,6 @@ os.environ['PYOPENGL_PLATFORM'] = 'egl'
 
 import torch
 from human_models.human_models import SMPLX
-from models.SMPLest_X import get_model
 
 def test_main_approach():
     print("🔍 Testing main branch approach...")

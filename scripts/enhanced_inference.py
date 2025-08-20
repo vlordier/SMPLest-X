@@ -200,11 +200,11 @@ def main():
     success = run_inference_with_error_handling(args.model_dir, file_stem, args.fps)
     
     if success:
-        print(f"\n🎉 Inference completed successfully!")
+        print("\n🎉 Inference completed successfully!")
         print(f"📁 Check output in: demo/result_{file_stem}.mp4")
         return True
     else:
-        print(f"\n💥 Inference failed. Check errors above.")
+        print("\n💥 Inference failed. Check errors above.")
         return False
 
 if __name__ == "__main__":

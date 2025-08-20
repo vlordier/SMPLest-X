@@ -1,0 +1,4 @@
+[lint]
+# Ignore star import issues in datasets/humandata.py since constants are intentionally 
+# imported globally and fixing would require significant architectural changes
+per-file-ignores = {"datasets/humandata.py" = ["F403", "F405"]}

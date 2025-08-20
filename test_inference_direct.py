@@ -10,7 +10,6 @@ os.environ['OMP_NUM_THREADS'] = '1'
 os.environ['PYOPENGL_PLATFORM'] = 'egl'
 
 import torch
-import numpy as np
 from models.SMPLest_X import get_model
 
 class MockConfig:

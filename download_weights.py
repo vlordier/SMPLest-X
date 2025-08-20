@@ -44,13 +44,13 @@ def download_smplest_x_weights():
             os.makedirs(download['local_dir'], exist_ok=True)
             
             # Download file to local directory
-            print(f"   🔄 Starting download...")
+            print("   🔄 Starting download...")
             downloaded_path = hf_hub_download(
                 repo_id=repo_id,
                 filename=download['filename'],
                 local_dir=download['local_dir']
             )
-            print(f"   🔄 Download completed")
+            print("   🔄 Download completed")
             
             print(f"   ✅ Downloaded to: {downloaded_path}")
             
@@ -65,7 +65,7 @@ def download_smplest_x_weights():
             print(f"   ❌ Failed to download {download['filename']}: {e}")
     
     print(f"\n{'='*60}")
-    print(f"📋 Download Summary")
+    print("📋 Download Summary")
     print(f"{'='*60}")
     print(f"✅ Successfully downloaded: {success_count}/{len(downloads)} files")
     
@@ -79,7 +79,7 @@ def download_smplest_x_weights():
 def verify_file_structure():
     """Verify that all files are in the correct locations"""
     
-    print(f"\n🔍 Verifying file structure...")
+    print("\n🔍 Verifying file structure...")
     print("=" * 40)
     
     expected_files = [

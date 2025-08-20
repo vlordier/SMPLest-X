@@ -10,7 +10,6 @@ os.environ['OMP_NUM_THREADS'] = '1'
 
 import torch
 from human_models.pytorch3d_smplx import Direct_SMPLX
-from models.SMPLest_X import get_model
 
 def test_pytorch3d_smplx():
     print("🔍 Testing Direct SMPL-X implementation...")
@@ -57,7 +56,7 @@ def test_pytorch3d_smplx():
         
         # Test compatibility layer
         layer = smplx_model.layer['neutral']
-        output2 = layer(
+        layer(  # Test layer functionality
             betas=shape, body_pose=body_pose, global_orient=global_orient,
             left_hand_pose=left_hand_pose, right_hand_pose=right_hand_pose,
             jaw_pose=jaw_pose, leye_pose=leye_pose, reye_pose=reye_pose,

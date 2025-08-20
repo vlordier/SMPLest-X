@@ -52,8 +52,8 @@ def main():
     distributed, gpu_idx = init_distributed_mode(args.master_port)
     
     # init human models
-    smpl = SMPL(cfg.model.human_model_path)
-    smpl_x = SMPLX(cfg.model.human_model_path)
+    SMPL(cfg.model.human_model_path)  # Initialize SMPL singleton
+    SMPLX(cfg.model.human_model_path)  # Initialize SMPLX singleton
 
     # init traininer
     trainer = Trainer(cfg, distributed, gpu_idx)

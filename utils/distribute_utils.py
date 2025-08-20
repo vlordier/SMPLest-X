@@ -1,8 +1,5 @@
 import os
-import os.path as osp
 import pickle
-import shutil
-import tempfile
 import time
 import torch
 import torch.distributed as dist

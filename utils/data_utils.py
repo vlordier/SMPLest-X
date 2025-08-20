@@ -1,7 +1,6 @@
 import numpy as np
 import cv2
 import random
-import math
 from human_models.human_models import SMPL, SMPLX
 from utils.transforms import cam2pixel, transform_joint_to_other_db
 import torch
@@ -21,20 +20,20 @@ def load_img(path, order='RGB'):
 
 def get_bbox(joint_img, joint_valid, extend_ratio=1.2):
     x_img, y_img = joint_img[:, 0], joint_img[:, 1]
-    x_img = x_img[joint_valid == 1];
-    y_img = y_img[joint_valid == 1];
-    xmin = min(x_img);
-    ymin = min(y_img);
-    xmax = max(x_img);
-    ymax = max(y_img);
+    x_img = x_img[joint_valid == 1]
+    y_img = y_img[joint_valid == 1]
+    xmin = min(x_img)
+    ymin = min(y_img)
+    xmax = max(x_img)
+    ymax = max(y_img)
 
-    x_center = (xmin + xmax) / 2.;
-    width = xmax - xmin;
+    x_center = (xmin + xmax) / 2.
+    width = xmax - xmin
     xmin = x_center - 0.5 * width * extend_ratio
     xmax = x_center + 0.5 * width * extend_ratio
 
-    y_center = (ymin + ymax) / 2.;
-    height = ymax - ymin;
+    y_center = (ymin + ymax) / 2.
+    height = ymax - ymin
     ymin = y_center - 0.5 * height * extend_ratio
     ymax = y_center + 0.5 * height * extend_ratio
 
@@ -156,7 +155,6 @@ def gen_cropped_two_hands(bbox, lhand_bbox, rhand_bbox, weight):
         right_x = max(lhand_bbox[2], rhand_bbox[2])
         bottom_y = min(lhand_bbox[3], rhand_bbox[3])
     bbox[2:] += bbox[:2]  # xywh -> xyxy
-    weight_1 = 1 - weight
     left_x = left_x - (left_x - bbox[0]) * np.random.uniform(weight, weight + 0.1)
     top_y = top_y - (top_y - bbox[1]) * np.random.uniform(weight, weight + 0.1)
     right_x = right_x + (bbox[2] - right_x) * np.random.uniform(weight, weight + 0.1)
@@ -244,7 +242,6 @@ def process_db_coord_crop(bbox, joint_img):
 def process_db_coord(joint_img, joint_cam, joint_valid, do_flip, img_shape, flip_pairs, img2bb_trans, rot,
                      src_joints_name, target_joints_name, input_img_shape, output_hm_shape, input_body_shape):
     smpl_x = SMPLX.get_instance()
-    joint_img_original = joint_img.copy()
     joint_img, joint_cam, joint_valid = joint_img.copy(), joint_cam.copy(), joint_valid.copy()
 
     # flip augmentation

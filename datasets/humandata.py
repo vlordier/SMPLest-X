@@ -5,8 +5,7 @@ import torch
 import copy
 from human_models.human_models import SMPL, SMPLX
 from utils.data_utils import load_img, process_bbox, augmentation, \
-    process_db_coord, process_human_model_output, \
-    process_db_coord_crop, gen_cropped_hands
+    process_db_coord, process_human_model_output
 from utils.transforms import rigid_align, batch_rodrigues
 import tqdm
 import time
@@ -149,7 +148,8 @@ class HumanDataset(torch.utils.data.Dataset):
         else:
             vertices3d_path = None
 
-        print(f'Start loading humandata {self.annot_path} into memory...\nDataset includes: {content.files}'); tic = time.time()
+        print(f'Start loading humandata {self.annot_path} into memory...\nDataset includes: {content.files}')
+        tic = time.time()
         image_path = content['image_path']
 
         if meta is not None and 'height' in meta:
@@ -263,9 +263,12 @@ class HumanDataset(torch.utils.data.Dataset):
         datalist = []
         
         for i in tqdm.tqdm(range(int(num_examples))):
-            if annot_valid is not None and not annot_valid[i]: continue # for agora
-            if skip_ubody is not None and skip_ubody[i]: continue # for ubody
-            if skip_mscoco is not None and skip_mscoco[i]: continue # for mscoco
+            if annot_valid is not None and not annot_valid[i]:
+                continue  # for agora
+            if skip_ubody is not None and skip_ubody[i]:
+                continue  # for ubody
+            if skip_mscoco is not None and skip_mscoco[i]:
+                continue  # for mscoco
 
             if self.data_split == 'train' and i % train_sample_interval != 0:
                 continue
@@ -401,7 +404,6 @@ class HumanDataset(torch.utils.data.Dataset):
             if as_smplx == 'smplh':
                 smplx_param['shape'] = np.zeros(10, dtype=np.float32) # drop smpl betas for smplx
 
-            import pdb
             # for hand datasets, set shape and pose to all zero
             if self.__class__.__name__ in ['FreiHand', 'InterHand', 'BlurHand', 'HanCo']:
                 smplx_param['shape'] = np.zeros((10, ))
@@ -707,7 +709,7 @@ class HumanDataset(torch.utils.data.Dataset):
                 
                 # build smplx but redo the hand rotation with global orientation
 
-                smplx_pose_rotmat = batch_rodrigues(torch.Tensor(smplx_pose.reshape(-1,3))).reshape(smplx_pose.shape[0], -1)    
+    
 
                 # redo the hand oration: R_gt x R_inv x hand mesh
                 R_gt_l = data['smplx_param']['lhand_root'] if 'lhand_root' in smplx_param else np.zeros((1, 3))
@@ -811,7 +813,6 @@ class HumanDataset(torch.utils.data.Dataset):
 
 
             if mesh_gt.shape[0] == 6890:
-                face = self.smpl.face
                 
                 # root align -> ds (better for pve and mpjpe)
                 mesh_out_root_align = mesh_out - np.dot(self.smpl_x.J_regressor, mesh_out)[self.smpl_x.J_regressor_idx['pelvis'], None,

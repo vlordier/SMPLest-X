@@ -4,8 +4,8 @@ from inspect import isfunction
 import copy
 import einops
 from einops import rearrange, repeat
-from typing import Callable, Optional, List
-from human_models.human_models import SMPLX, SMPL
+from typing import Callable, Optional, List, Union
+from human_models.human_models import SMPLX
 from functools import partial
 from timm.layers import drop_path, to_2tuple, trunc_normal_
 import torch.utils.checkpoint as checkpoint
@@ -158,6 +158,11 @@ class TransformerDecoder(nn.Module):
         skip_token_embedding: bool = False,
     ):
         super().__init__()
+        
+        # Type annotations for dynamic attributes
+        self.to_token_embedding: Union[nn.Linear, nn.Identity]
+        self.dropout: Union['DropTokenDropout', 'ZeroTokenDropout', nn.Dropout]
+        
         if not skip_token_embedding:
             self.to_token_embedding = nn.Linear(token_dim, dim)
         else:
@@ -210,7 +215,7 @@ class TransformerCrossAttn(nn.Module):
         context_dim: Optional[int] = None,
     ):
         super().__init__()
-        self.layers = nn.ModuleList([])
+        self.layers: nn.ModuleList = nn.ModuleList([])
         for _ in range(depth):
             sa = Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)
             ca = CrossAttention(
@@ -233,7 +238,9 @@ class TransformerCrossAttn(nn.Module):
         if len(context_list) != len(self.layers):
             raise ValueError(f"len(context_list) != len(self.layers) ({len(context_list)} != {len(self.layers)})")
 
-        for i, (self_attn, cross_attn, ff) in enumerate(self.layers):
+        for i, layer_tuple in enumerate(self.layers):
+            # Each layer_tuple is a ModuleList containing [self_attn, cross_attn, ff]
+            self_attn, cross_attn, ff = layer_tuple[0], layer_tuple[1], layer_tuple[2]  # type: ignore[index]
             x = self_attn(x, *args) + x
             x = cross_attn(x, *args, context=context_list[i]) + x
             x = ff(x, *args) + x
@@ -440,7 +447,7 @@ def linear_norm_activ_dropout(
     dropout: float = 0.0,
     norm_cond_dim: int = -1,
 ) -> SequentialCond:
-    layers = []
+    layers: List[nn.Module] = []
     layers.append(torch.nn.Linear(input_dim, output_dim, bias=bias))
     if norm is not None:
         layers.append(normalization_layer(norm, output_dim, norm_cond_dim))
@@ -460,7 +467,7 @@ def create_simple_mlp(
     dropout: float = 0.0,
     norm_cond_dim: int = -1,
 ) -> SequentialCond:
-    layers = []
+    layers: List[nn.Module] = []
     prev_dim = input_dim
     for hidden_dim in hidden_dims:
         layers.extend(

@@ -1,10 +1,11 @@
 import os
 import cv2
 import numpy as np
-from mpl_toolkits.mplot3d import Axes3D
+import trimesh
+# Configure matplotlib for headless rendering before any pyplot imports
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import matplotlib as mpl
-import os
 
 # Mac OpenGL compatibility setup
 def setup_mac_opengl():
@@ -54,7 +55,8 @@ def create_mock_pyrender():
     mock_pyrender = ModuleType('pyrender')
     mock_pyrender.OffscreenRenderer = MockOffscreenRenderer
     mock_pyrender.RenderFlags = MockRenderFlags
-    mock_pyrender.PerspectiveCamera = lambda: None
+    mock_pyrender.PerspectiveCamera = lambda *args, **kwargs: None
+    mock_pyrender.IntrinsicsCamera = lambda *args, **kwargs: None
     mock_pyrender.DirectionalLight = lambda: None
     mock_pyrender.Scene = lambda: type('Scene', (), {'add': lambda *args: None})()
     mock_pyrender.Mesh = lambda *args, **kwargs: None
@@ -68,7 +70,6 @@ try:
 except Exception as e:
     print(f"❌ OpenGL setup failed completely: {e}")
     pyrender = create_mock_pyrender()
-import trimesh
 
 def vis_keypoints_with_skeleton(img, kps, kps_lines, kp_thresh=0.4, alpha=1):
     # Convert from plt 0-1 RGBA colors to 0-255 BGR colors for opencv.
@@ -80,23 +81,23 @@ def vis_keypoints_with_skeleton(img, kps, kps_lines, kp_thresh=0.4, alpha=1):
     kp_mask = np.copy(img)
 
     # Draw the keypoints.
-    for l in range(len(kps_lines)):
-        i1 = kps_lines[l][0]
-        i2 = kps_lines[l][1]
+    for line_idx in range(len(kps_lines)):
+        i1 = kps_lines[line_idx][0]
+        i2 = kps_lines[line_idx][1]
         p1 = kps[0, i1].astype(np.int32), kps[1, i1].astype(np.int32)
         p2 = kps[0, i2].astype(np.int32), kps[1, i2].astype(np.int32)
         if kps[2, i1] > kp_thresh and kps[2, i2] > kp_thresh:
             cv2.line(
                 kp_mask, p1, p2,
-                color=colors[l], thickness=2, lineType=cv2.LINE_AA)
+                color=colors[line_idx], thickness=2, lineType=cv2.LINE_AA)
         if kps[2, i1] > kp_thresh:
             cv2.circle(
                 kp_mask, p1,
-                radius=3, color=colors[l], thickness=-1, lineType=cv2.LINE_AA)
+                radius=3, color=colors[line_idx], thickness=-1, lineType=cv2.LINE_AA)
         if kps[2, i2] > kp_thresh:
             cv2.circle(
                 kp_mask, p2,
-                radius=3, color=colors[l], thickness=-1, lineType=cv2.LINE_AA)
+                radius=3, color=colors[line_idx], thickness=-1, lineType=cv2.LINE_AA)
 
     # Blend the keypoints.
     return cv2.addWeighted(img, 1.0 - alpha, kp_mask, alpha, 0)
@@ -149,23 +150,21 @@ def vis_3d_skeleton(kpt_3d, kpt_3d_vis, kps_lines, filename=None):
     colors = [cmap(i) for i in np.linspace(0, 1, len(kps_lines) + 2)]
     colors = [np.array((c[2], c[1], c[0])) for c in colors]
 
-    for l in range(len(kps_lines)):
-        i1 = kps_lines[l][0]
-        i2 = kps_lines[l][1]
+    for line_idx in range(len(kps_lines)):
+        i1 = kps_lines[line_idx][0]
+        i2 = kps_lines[line_idx][1]
         x = np.array([kpt_3d[i1,0], kpt_3d[i2,0]])
         y = np.array([kpt_3d[i1,1], kpt_3d[i2,1]])
         z = np.array([kpt_3d[i1,2], kpt_3d[i2,2]])
 
         if kpt_3d_vis[i1,0] > 0 and kpt_3d_vis[i2,0] > 0:
-            ax.plot(x, z, -y, c=colors[l], linewidth=2)
+            ax.plot(x, z, -y, c=colors[line_idx], linewidth=2)
         if kpt_3d_vis[i1,0] > 0:
-            ax.scatter(kpt_3d[i1,0], kpt_3d[i1,2], -kpt_3d[i1,1], c=colors[l], marker='o')
+            ax.scatter(kpt_3d[i1,0], kpt_3d[i1,2], -kpt_3d[i1,1], c=colors[line_idx], marker='o')
         if kpt_3d_vis[i2,0] > 0:
-            ax.scatter(kpt_3d[i2,0], kpt_3d[i2,2], -kpt_3d[i2,1], c=colors[l], marker='o')
+            ax.scatter(kpt_3d[i2,0], kpt_3d[i2,2], -kpt_3d[i2,1], c=colors[line_idx], marker='o')
 
-    x_r = np.array([0, cfg.input_shape[1]], dtype=np.float32)
-    y_r = np.array([0, cfg.input_shape[0]], dtype=np.float32)
-    z_r = np.array([0, 1], dtype=np.float32)
+    # Remove unused variables that reference undefined cfg
     
     if filename is None:
         ax.set_title('3D vis')
@@ -179,6 +178,96 @@ def vis_3d_skeleton(kpt_3d, kpt_3d_vis, kps_lines, filename=None):
 
     plt.show()
     cv2.waitKey(0)
+
+def perspective_projection_robust(vertices_3d, camera_params):
+    """
+    Project 3D vertices to 2D using camera parameters with robust handling
+    """
+    focal = camera_params['focal']
+    princpt = camera_params['princpt']
+    
+    vertices_2d = vertices_3d.copy()
+    
+    # Avoid division by zero
+    z_mask = vertices_3d[:, 2] > 0.001
+    vertices_2d[z_mask, 0] = vertices_3d[z_mask, 0] * focal[0] / vertices_3d[z_mask, 2] + princpt[0]
+    vertices_2d[z_mask, 1] = vertices_3d[z_mask, 1] * focal[1] / vertices_3d[z_mask, 2] + princpt[1]
+    
+    return vertices_2d, z_mask
+
+def draw_mesh_wireframe(img, vertices_3d, faces, camera_params, color=(0, 255, 255), thickness=1):
+    """
+    Draw mesh wireframe on image with improved visibility
+    """
+    img_height, img_width = img.shape[:2]
+    
+    # Project vertices to 2D
+    vertices_2d, valid_mask = perspective_projection_robust(vertices_3d, camera_params)
+    
+    # Convert to integer coordinates
+    vertices_2d_int = vertices_2d.astype(np.int32)
+    
+    # Draw faces as wireframe - subsample for performance
+    faces_to_draw = faces[::max(1, len(faces)//1000)]  # Draw max 1000 faces
+    faces_drawn = 0
+    
+    for face in faces_to_draw:
+        # Get the three vertices of the face
+        v1_idx, v2_idx, v3_idx = face[0], face[1], face[2]
+        
+        # Check if all vertices are valid and indices are in range
+        if (v1_idx >= len(valid_mask) or v2_idx >= len(valid_mask) or v3_idx >= len(valid_mask)):
+            continue
+            
+        if not (valid_mask[v1_idx] and valid_mask[v2_idx] and valid_mask[v3_idx]):
+            continue
+            
+        v1 = vertices_2d_int[v1_idx]
+        v2 = vertices_2d_int[v2_idx] 
+        v3 = vertices_2d_int[v3_idx]
+        
+        # Check if vertices are within image bounds (with some margin)
+        margin = 50
+        if (all(-margin < pt[0] < img_width + margin and -margin < pt[1] < img_height + margin 
+               for pt in [v1, v2, v3])):
+            
+            # Draw triangle edges
+            cv2.line(img, tuple(v1), tuple(v2), color, thickness)
+            cv2.line(img, tuple(v2), tuple(v3), color, thickness)  
+            cv2.line(img, tuple(v3), tuple(v1), color, thickness)
+            faces_drawn += 1
+    
+    print(f"Drew {faces_drawn} wireframe faces")
+    return img
+
+def render_mesh_improved(img, vertices, faces, camera_params):
+    """
+    Improved mesh rendering with better Mac compatibility
+    """
+    print(f"Rendering mesh: {len(vertices)} vertices, {len(faces)} faces")
+    
+    # Create a copy of the image
+    result_img = img.copy()
+    
+    # Method 1: Draw wireframe
+    try:
+        result_img = draw_mesh_wireframe(result_img, vertices, faces, camera_params, 
+                                       color=(0, 255, 255), thickness=1)
+    except Exception as e:
+        print(f"Wireframe rendering failed: {e}")
+        # Fallback to vertex points
+        vertices_2d, valid_mask = perspective_projection_robust(vertices, camera_params)
+        vertices_2d_int = vertices_2d.astype(np.int32)
+        
+        # Draw subset of vertices as points
+        step = max(1, len(vertices) // 200)  # Draw ~200 points max
+        for i in range(0, len(vertices), step):
+            if valid_mask[i]:
+                pt = tuple(vertices_2d_int[i])
+                if 0 <= pt[0] < img.shape[1] and 0 <= pt[1] < img.shape[0]:
+                    cv2.circle(result_img, pt, 1, (0, 255, 255), -1)
+    
+    return result_img
 
 def save_obj(v, f, file_name='output.obj'):
     obj_file = open(file_name, 'w')

@@ -123,7 +123,7 @@ def handle_mps_fallback(func, *args, **kwargs):
         return func(*args, **kwargs)
     except RuntimeError as e:
         if 'mps' in str(e).lower() or 'metal' in str(e).lower():
-            print(f"⚠️  MPS operation failed, using CPU fallback")
+            print("⚠️  MPS operation failed, using CPU fallback")
             # Move tensors to CPU
             cpu_args = []
             for arg in args:
@@ -138,7 +138,7 @@ def handle_mps_fallback(func, *args, **kwargs):
             if hasattr(result, 'to'):
                 try:
                     return result.to(get_device())
-                except:
+                except Exception:
                     return result
             return result
         else:

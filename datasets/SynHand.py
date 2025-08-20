@@ -25,9 +25,9 @@ class SynHand(HumanDataset):
             self.img_dir = osp.join(self.cfg.data.data_dir, 'img', 'synbody')
                 
             if self.data_split == 'train':
-                filename = f'synhand_20240927_241004_4628_fix_betas.npz'
+                filename = 'synhand_20240927_241004_4628_fix_betas.npz'
             else:
-                filename = f'synhand_20241018_test_241023_1188_fix_betas.npz'
+                filename = 'synhand_20241018_test_241023_1188_fix_betas.npz'
 
             self.annot_path = osp.join(self.cfg.data.data_dir, 'annot', filename)
             

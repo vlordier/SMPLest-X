@@ -61,8 +61,8 @@ def main():
     cfg.dump_config()
     
     # init human models
-    smpl = SMPL(cfg.model.human_model_path)
-    smpl_x = SMPLX(cfg.model.human_model_path)
+    SMPL(cfg.model.human_model_path)  # Initialize SMPL singleton
+    SMPLX(cfg.model.human_model_path)  # Initialize SMPLX singleton
 
     # init tester
     tester = Tester(cfg)
