@@ -29,14 +29,48 @@ print_info() {
 
 # Check arguments
 if [ $# -lt 2 ]; then
-    print_error "Usage: $0 <MODEL_DIR> <FILE_NAME> [FPS]"
+    print_error "Usage: $0 <MODEL_DIR> <FILE_NAME> [FPS] [--save-meshes] [--save-mesh-renders] [--mesh-format FORMAT]"
     echo "Example: $0 smplest_x_h test_person.mp4 30"
+    echo "         $0 smplest_x_h test_person.mp4 30 --save-meshes --save-mesh-renders --mesh-format obj"
+    echo ""
+    echo "Options:"
+    echo "  --save-meshes         Save 3D meshes in specified format"
+    echo "  --save-mesh-renders   Save isolated mesh renders"
+    echo "  --mesh-format FORMAT  Mesh format: obj (default) or ply"
     exit 1
 fi
 
 CKPT_NAME=$1
 FILE_NAME=$2
 FPS=${3:-30}
+
+# Parse additional options
+SAVE_MESHES=""
+SAVE_MESH_RENDERS=""
+MESH_FORMAT="obj"
+
+# Parse remaining arguments
+shift 3 2>/dev/null || true  # Remove first 3 arguments if they exist
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --save-meshes)
+            SAVE_MESHES="--save_meshes"
+            shift
+            ;;
+        --save-mesh-renders)
+            SAVE_MESH_RENDERS="--save_mesh_renders"
+            shift
+            ;;
+        --mesh-format)
+            MESH_FORMAT="$2"
+            shift 2
+            ;;
+        *)
+            print_warning "Unknown option: $1"
+            shift
+            ;;
+    esac
+done
 
 NAME="${FILE_NAME%.*}"
 EXT="${FILE_NAME##*.}"
@@ -140,6 +174,9 @@ if command -v timeout &> /dev/null; then
         --file_name "$NAME" \
         --ckpt_name "$CKPT_NAME" \
         --end "$END_COUNT" \
+        $SAVE_MESHES \
+        $SAVE_MESH_RENDERS \
+        --mesh_format "$MESH_FORMAT" \
     && inference_success=1 \
     || print_warning "⚠️ Inference completed with errors but checking for partial results..."
 else
@@ -149,6 +186,9 @@ else
         --file_name "$NAME" \
         --ckpt_name "$CKPT_NAME" \
         --end "$END_COUNT" \
+        $SAVE_MESHES \
+        $SAVE_MESH_RENDERS \
+        --mesh_format "$MESH_FORMAT" \
     && inference_success=1 \
     || print_warning "⚠️ Inference completed with errors but checking for partial results..."
 fi
