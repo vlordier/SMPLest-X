@@ -80,9 +80,4 @@ def set_device(device_id):
 def get_device_name():
     """Get a string representation of the current device."""
     device = get_device()
-    if device.type == 'mps':
-        return 'mps'
-    elif device.type == 'cuda':
-        return 'cuda'
-    else:
-        return 'cpu'
+    return device.type
