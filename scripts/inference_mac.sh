@@ -132,23 +132,35 @@ export PYTHONPATH=".:$PYTHONPATH"
 # Create a timeout wrapper for the inference
 timeout_duration=600  # 10 minutes
 
+# Store inference result but continue processing
+inference_success=0
 if command -v timeout &> /dev/null; then
     timeout $timeout_duration python main/inference.py \
         --num_gpus 1 \
         --file_name "$NAME" \
         --ckpt_name "$CKPT_NAME" \
-        --end "$END_COUNT"
+        --end "$END_COUNT" \
+    && inference_success=1 \
+    || print_warning "⚠️ Inference completed with errors but checking for partial results..."
 else
     # Fallback for systems without timeout command
     python main/inference.py \
         --num_gpus 1 \
         --file_name "$NAME" \
         --ckpt_name "$CKPT_NAME" \
-        --end "$END_COUNT"
+        --end "$END_COUNT" \
+    && inference_success=1 \
+    || print_warning "⚠️ Inference completed with errors but checking for partial results..."
 fi
 
-if [ $? -ne 0 ]; then
-    print_error "Inference failed"
+# Check if any output frames were generated
+output_frames=$(find "$OUTPUT_PATH" -name "*.jpg" 2>/dev/null | wc -l | tr -d ' ')
+
+if [ "$output_frames" -gt 0 ]; then
+    print_status "Found $output_frames output frames, proceeding with video generation"
+    inference_success=1
+elif [ "$inference_success" -eq 0 ]; then
+    print_error "Inference failed and no output frames generated"
     print_warning "Check the output above for error details"
     print_warning "Common fixes:"
     print_warning "  - Ensure model files are downloaded: python download_weights.py"
