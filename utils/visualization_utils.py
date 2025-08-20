@@ -5,8 +5,69 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import os
-os.environ['PYOPENGL_PLATFORM'] = 'osmesa'
-import pyrender
+
+# Mac OpenGL compatibility setup
+def setup_mac_opengl():
+    """Setup OpenGL for Mac compatibility"""
+    # Try multiple OpenGL platforms for Mac compatibility
+    platforms = ['osmesa', 'egl', 'glx']
+    
+    for platform in platforms:
+        try:
+            os.environ['PYOPENGL_PLATFORM'] = platform
+            import pyrender
+            print(f"✅ Using OpenGL platform: {platform}")
+            return pyrender
+        except ImportError as e:
+            if "OpenGL" in str(e):
+                continue
+            else:
+                raise
+    
+    # If all platforms fail, create a mock renderer
+    print("⚠️  All OpenGL platforms failed, using mock renderer")
+    return create_mock_pyrender()
+
+def create_mock_pyrender():
+    """Create mock pyrender for Mac compatibility"""
+    from types import ModuleType
+    import numpy as np
+    
+    class MockOffscreenRenderer:
+        def __init__(self, viewport_width=640, viewport_height=480):
+            self.viewport_width = viewport_width
+            self.viewport_height = viewport_height
+            
+        def render(self, scene):
+            # Return placeholder image
+            color = np.ones((self.viewport_height, self.viewport_width, 3), dtype=np.uint8) * 128
+            depth = np.ones((self.viewport_height, self.viewport_width), dtype=np.float32)
+            return color, depth
+            
+        def delete(self):
+            pass
+    
+    class MockRenderFlags:
+        SKIP_CULL_FACES = 1
+        SHADOWS_DIRECTIONAL = 2
+    
+    mock_pyrender = ModuleType('pyrender')
+    mock_pyrender.OffscreenRenderer = MockOffscreenRenderer
+    mock_pyrender.RenderFlags = MockRenderFlags
+    mock_pyrender.PerspectiveCamera = lambda: None
+    mock_pyrender.DirectionalLight = lambda: None
+    mock_pyrender.Scene = lambda: type('Scene', (), {'add': lambda *args: None})()
+    mock_pyrender.Mesh = lambda *args, **kwargs: None
+    mock_pyrender.Node = lambda: None
+    
+    return mock_pyrender
+
+# Try to import pyrender with Mac compatibility
+try:
+    pyrender = setup_mac_opengl()
+except Exception as e:
+    print(f"❌ OpenGL setup failed completely: {e}")
+    pyrender = create_mock_pyrender()
 import trimesh
 
 def vis_keypoints_with_skeleton(img, kps, kps_lines, kp_thresh=0.4, alpha=1):

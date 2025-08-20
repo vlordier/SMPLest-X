@@ -81,3 +81,65 @@ def get_device_name():
     """Get a string representation of the current device."""
     device = get_device()
     return device.type
+
+
+def setup_mac_environment():
+    """Setup Mac-specific environment variables for optimal performance."""
+    import os
+    
+    # Enable MPS fallback for unsupported operations
+    os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
+    
+    # Prevent OpenMP threading issues on Mac
+    os.environ.setdefault('OMP_NUM_THREADS', '1')
+    
+    # MPS memory management
+    os.environ.setdefault('PYTORCH_MPS_HIGH_WATERMARK_RATIO', '0.0')
+    
+    # Disable problematic optimizations
+    os.environ.setdefault('PYTORCH_MPS_ENABLE_GRAPH_OPTIMIZATION', '0')
+    
+    return True
+
+
+def safe_to_device(tensor_or_model, device=None, fallback_cpu=True):
+    """Safely move tensor/model to device with fallback on Mac."""
+    if device is None:
+        device = get_device()
+    
+    try:
+        return tensor_or_model.to(device)
+    except RuntimeError as e:
+        if fallback_cpu and 'mps' in device.type.lower():
+            print(f"⚠️  MPS error, falling back to CPU: {e}")
+            return tensor_or_model.to('cpu')
+        else:
+            raise
+
+
+def handle_mps_fallback(func, *args, **kwargs):
+    """Execute function with MPS fallback to CPU if needed."""
+    try:
+        return func(*args, **kwargs)
+    except RuntimeError as e:
+        if 'mps' in str(e).lower() or 'metal' in str(e).lower():
+            print(f"⚠️  MPS operation failed, using CPU fallback")
+            # Move tensors to CPU
+            cpu_args = []
+            for arg in args:
+                if hasattr(arg, 'cpu'):
+                    cpu_args.append(arg.cpu())
+                else:
+                    cpu_args.append(arg)
+            
+            result = func(*cpu_args, **kwargs)
+            
+            # Try to move result back to MPS
+            if hasattr(result, 'to'):
+                try:
+                    return result.to(get_device())
+                except:
+                    return result
+            return result
+        else:
+            raise
