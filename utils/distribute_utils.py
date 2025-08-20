@@ -8,6 +8,7 @@ import torch
 import torch.distributed as dist
 import random
 import numpy as np
+from .device_utils import get_device, synchronize
 
 
 def get_dist_info():
@@ -31,11 +32,12 @@ def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def time_synchronized():
-    torch.cuda.synchronize() if torch.cuda.is_available() else None
+    synchronize()  # Use centralized synchronization
     return time.time()
 
 
@@ -64,10 +66,15 @@ def init_distributed_mode(port = None, master_port=29500):
         port (int, optional): Master port. Defaults to None.
     """
     # import pdb; pdb.set_trace()
-    dist_backend = 'nccl'
-    rank = int(os.environ['RANK'])
-    num_gpus = torch.cuda.device_count()
-    torch.cuda.set_device(rank % num_gpus)
+    if torch.cuda.is_available():
+        dist_backend = 'nccl'
+        rank = int(os.environ['RANK'])
+        num_gpus = torch.cuda.device_count()
+        torch.cuda.set_device(rank % num_gpus)
+    else:
+        dist_backend = 'gloo'  # Use gloo backend for non-CUDA devices
+        rank = int(os.environ['RANK'])
+        num_gpus = 1  # For MPS or CPU
 
     dist.init_process_group(backend=dist_backend)
     distributed = True
@@ -98,7 +105,10 @@ def get_rank():
 def get_process_groups():
     world_size = int(os.environ['WORLD_SIZE'])
     ranks = list(range(world_size))
-    num_gpus = torch.cuda.device_count()
+    if torch.cuda.is_available():
+        num_gpus = torch.cuda.device_count()
+    else:
+        num_gpus = 1
     num_nodes = world_size // num_gpus
     if world_size % num_gpus != 0:
         raise NotImplementedError('Not implemented for node not fully used.')
@@ -111,7 +121,10 @@ def get_process_groups():
     return process_groups
 
 def get_group_idx():
-    num_gpus = torch.cuda.device_count()
+    if torch.cuda.is_available():
+        num_gpus = torch.cuda.device_count()
+    else:
+        num_gpus = 1
     proc_id = get_rank()
     group_idx = proc_id // num_gpus
 
@@ -141,11 +154,12 @@ def all_gather(data):
     # serialized to a Tensor
     buffer = pickle.dumps(data)
     storage = torch.ByteStorage.from_buffer(buffer)
-    tensor = torch.ByteTensor(storage).to('cuda')
+    device = get_device()  # Use centralized device selection
+    tensor = torch.ByteTensor(storage).to(device)
 
     # obtain Tensor size of each rank
-    local_size = torch.tensor([tensor.numel()], device='cuda')
-    size_list = [torch.tensor([0], device='cuda') for _ in range(world_size)]
+    local_size = torch.tensor([tensor.numel()], device=device)
+    size_list = [torch.tensor([0], device=device) for _ in range(world_size)]
     dist.all_gather(size_list, local_size)
     size_list = [int(size.item()) for size in size_list]
     max_size = max(size_list)
@@ -156,10 +170,10 @@ def all_gather(data):
     tensor_list = []
     for _ in size_list:
         tensor_list.append(
-            torch.empty((max_size, ), dtype=torch.uint8, device='cuda'))
+            torch.empty((max_size, ), dtype=torch.uint8, device=device))
     if local_size != max_size:
         padding = torch.empty(
-            size=(max_size - local_size, ), dtype=torch.uint8, device='cuda')
+            size=(max_size - local_size, ), dtype=torch.uint8, device=device)
         tensor = torch.cat((tensor, padding), dim=0)
     dist.all_gather(tensor_list, tensor)
 

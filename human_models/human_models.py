@@ -7,16 +7,23 @@ import pickle
 class SMPLX:
     _instance = None
 
-    def __new__(cls,config=None):
+    def __new__(cls, config=None):
         """Ensures only one instance of SMPL exists."""
         if cls._instance is None:
             assert config is not None, 'SMPLX requires human model path'
             cls._instance = super(SMPLX, cls).__new__(cls)
             cls._instance._initialize(config)
         return cls._instance
+    
+    @classmethod
+    def reset_instance(cls):
+        """Reset the singleton instance to allow re-initialization."""
+        cls._instance = None
 
     def _initialize(self, human_model_path):
         self.layer_arg = {'create_global_orient': False, 'create_body_pose': False, 'create_left_hand_pose': False, 'create_right_hand_pose': False, 'create_jaw_pose': False, 'create_leye_pose': False, 'create_reye_pose': False, 'create_betas': False, 'create_expression': False, 'create_transl': False}
+        
+        # Use default SMPL-X creation and handle coefficient mismatch with input padding
         self.layer = {'neutral': smplx.create(human_model_path, 'smplx', gender='NEUTRAL', use_pca=False, use_face_contour=True, **self.layer_arg),
                         'male': smplx.create(human_model_path, 'smplx', gender='MALE', use_pca=False, use_face_contour=True, **self.layer_arg),
                         'female': smplx.create(human_model_path, 'smplx', gender='FEMALE', use_pca=False, use_face_contour=True, **self.layer_arg)
