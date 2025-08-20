@@ -204,7 +204,12 @@ def render_mesh(img, vertices, faces, cam_param, mesh_as_vertices=False):
         img = vis_keypoints(img, vertices_2d, alpha=0.8, radius=2, color=(0, 0, 255))
     else:
         focal, princpt = cam_param['focal'], cam_param['princpt']
-        camera = pyrender.IntrinsicsCamera(fx=focal[0], fy=focal[1], cx=princpt[0], cy=princpt[1])
+        # Use PerspectiveCamera for newer pyrender versions
+        try:
+            camera = pyrender.IntrinsicsCamera(fx=focal[0], fy=focal[1], cx=princpt[0], cy=princpt[1])
+        except AttributeError:
+            # Fallback to PerspectiveCamera for newer pyrender versions
+            camera = pyrender.PerspectiveCamera(yfov=2*np.arctan(princpt[1]/focal[1]), aspectRatio=focal[0]/focal[1])
         # the inverse is same
         pyrender2opencv = np.array([[1.0, 0, 0, 0],
                                     [0, -1, 0, 0],

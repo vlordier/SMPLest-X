@@ -242,6 +242,17 @@ class Direct_SMPLX:
         new_joint = torch.stack(new_joint,1)
         return new_joint
 
+    def to(self, device):
+        """Move model tensors to the specified device"""
+        self.device = device if isinstance(device, torch.device) else torch.device(device)
+        
+        # Move all model tensors to the new device
+        for key in ['v_template', 'shapedirs', 'posedirs', 'J_regressor', 'parents', 'lbs_weights', 'faces_tensor']:
+            if hasattr(self, key) and hasattr(getattr(self, key), 'to'):
+                setattr(self, key, getattr(self, key).to(self.device))
+        
+        return self
+
     @classmethod
     def get_instance(cls):
         """Retrieve the singleton instance"""
@@ -257,6 +268,11 @@ class Direct_SMPLX:
                 
             def __call__(self, **kwargs):
                 return self.pytorch3d_model.forward(**kwargs)
+                
+            def to(self, device):
+                """Move model to device and return self for compatibility"""
+                self.pytorch3d_model.to(device)
+                return self
                 
             @property
             def faces(self):
