@@ -7,6 +7,7 @@ import copy
 from models.module import TransformerDecoderHead, ViT
 from models.loss import CoordLoss, ParamLoss
 from human_models.human_models import SMPL, SMPLX
+from human_models.pytorch3d_smplx import Direct_SMPLX
 from utils.transforms import rot6d_to_axis_angle, batch_rodrigues, rot6d_to_rotmat
 from utils.data_utils import load_img
 from utils.device_utils import get_device, to_device
@@ -15,7 +16,9 @@ from utils.device_utils import get_device, to_device
 class Model(nn.Module):
     def __init__(self, config, encoder, decoder):
         super(Model, self).__init__()
-        self.smpl_x = SMPLX.get_instance()
+        # Use Direct SMPLX to bypass coefficient mismatch issues
+        Direct_SMPLX.reset_instance()
+        self.smpl_x = Direct_SMPLX(config.model.human_model_path)
         
         # network
         self.cfg = config
@@ -53,10 +56,12 @@ class Model(nn.Module):
     def get_coord(self, root_pose, body_pose, lhand_pose, rhand_pose, jaw_pose, shape, expr, cam_trans, mode):
         batch_size = root_pose.shape[0]
         zero_pose = to_device(torch.zeros((1, 3)).float().repeat(batch_size, 1))  # eye poses
-        # transl=cam_trans, 
-        output = self.smplx_layer(betas=shape, body_pose=body_pose, global_orient=root_pose, right_hand_pose=rhand_pose,
-                                  transl=cam_trans, left_hand_pose=lhand_pose, jaw_pose=jaw_pose, leye_pose=zero_pose,
-                                  reye_pose=zero_pose, expression=expr)
+        
+        # Use Direct SMPLX forward pass (no coefficient mismatch issues)
+        output = self.smplx_layer(betas=shape, body_pose=body_pose, global_orient=root_pose, 
+                                  right_hand_pose=rhand_pose, transl=cam_trans, 
+                                  left_hand_pose=lhand_pose, jaw_pose=jaw_pose, 
+                                  leye_pose=zero_pose, reye_pose=zero_pose, expression=expr)
         # camera-centered 3D coordinate
         mesh_cam = output.vertices
         if mode == 'test' and self.cfg.data.testset in ['AGORA_test', 'BEDLAM_test']:  # use 144 joints for AGORA evaluation

@@ -1,0 +1,106 @@
+[0;34mℹ️[0m 🤖 SMPLest-X Inference for Mac
+[0;34mℹ️[0m Model: smplest_x_h, File: 1349093_720p.mp4, FPS: 30
+= assets configs data datasets debug_output.log debug_output2.log debug_output3.log demo download_weights.py human_models humandata_prep LICENSE.txt main models outputs pretrained_models README.md requirements.txt scripts utils 50
+[0;32m✅[0m Environment configured for Mac
+[0;34mℹ️[0m Running pre-flight checks...
+[0;32m✅[0m Pre-flight checks passed
+[0;32m✅[0m Created working directories
+[0;34mℹ️[0m Converting video to frames...
+[0;32m✅[0m Extracted 955 frames
+[0;34mℹ️[0m Running SMPLest-X inference...
+[92m08-20 12:10:32[0m Using 1 GPU.
+[92m08-20 12:10:32[0m Inference [1349093_720p] with [./pretrained_models/smplest_x_h/smplest_x_h.pth.tar].
+[92m08-20 12:10:32[0m Load checkpoint from ./pretrained_models/smplest_x_h/smplest_x_h.pth.tar
+[92m08-20 12:10:32[0m Creating graph...
+[92m08-20 12:10:37[0m [93mWRN: Attention: Strict=False is set for checkpoint loading. Please check manually.[0m
+❌ OpenGL setup failed completely: ('Unable to load EGL library', "dlopen(EGL, 0x000A): tried: 'EGL' (no such file), '/System/Volumes/Preboot/Cryptexes/OSEGL' (no such file), '/opt/homebrew/lib/EGL' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/lib/EGL' (no such file), '/opt/homebrew/lib/EGL' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/lib/EGL' (no such file), '/usr/lib/EGL' (no such file, not in dyld cache), 'EGL' (no such file)", 'EGL', None)
+WARNING: You are using a SMPL-X model, with only 10 shape coefficients.
+WARNING: You are using a SMPL-X model, with only 10 shape and 10 expression coefficients.
+DEBUG: Initial NEUTRAL shapedirs shape: torch.Size([10475, 3, 10])
+DEBUG: Checking all parameters and buffers for NEUTRAL
+WARNING: You are using a SMPL-X model, with only 10 shape coefficients.
+WARNING: You are using a SMPL-X model, with only 10 shape and 10 expression coefficients.
+DEBUG: Initial MALE shapedirs shape: torch.Size([10475, 3, 10])
+DEBUG: Checking all parameters and buffers for MALE
+WARNING: You are using a SMPL-X model, with only 10 shape coefficients.
+WARNING: You are using a SMPL-X model, with only 10 shape and 10 expression coefficients.
+DEBUG: Initial FEMALE shapedirs shape: torch.Size([10475, 3, 10])
+DEBUG: Checking all parameters and buffers for FEMALE
+WARNING: You are using a SMPL-X model, with only 10 shape coefficients.
+WARNING: You are using a SMPL-X model, with only 10 shape and 10 expression coefficients.
+DEBUG: Initial NEUTRAL shapedirs shape: torch.Size([10475, 3, 10])
+DEBUG: Checking all parameters and buffers for NEUTRAL
+WARNING: You are using a SMPL-X model, with only 10 shape coefficients.
+WARNING: You are using a SMPL-X model, with only 10 shape and 10 expression coefficients.
+DEBUG: Initial MALE shapedirs shape: torch.Size([10475, 3, 10])
+DEBUG: Checking all parameters and buffers for MALE
+WARNING: You are using a SMPL-X model, with only 10 shape coefficients.
+WARNING: You are using a SMPL-X model, with only 10 shape and 10 expression coefficients.
+DEBUG: Initial FEMALE shapedirs shape: torch.Size([10475, 3, 10])
+DEBUG: Checking all parameters and buffers for FEMALE
+DEBUG: Original shapedirs shape: torch.Size([10475, 3, 10])
+Total #parameters: 687223152 (0.69B)
+  0%|          | 0/955 [00:00<?, ?it/s]/Users/vincent.lordier/Work/SMPLest-X/utils/transforms.py:235: UserWarning: Using torch.cross without specifying the dim arg is deprecated.
+Please either pass the dim explicitly or simply use torch.linalg.cross.
+The default value of dim will change to agree with that of linalg.cross in a future release. (Triggered internally at /Users/runner/work/pytorch/pytorch/pytorch/aten/src/ATen/native/Cross.cpp:67.)
+  b3 = torch.cross(b1, b2)
+  0%|          | 0/955 [00:01<?, ?it/s]
+DEBUG: shape tensor shape: torch.Size([1, 10])
+DEBUG: smplx_layer.shapedirs shape: torch.Size([10475, 3, 10])
+DEBUG: shape tensor: tensor([-0.0987, -0.0424, -0.2084,  0.1980,  0.1330,  0.1473,  0.0027, -0.0864,  0.0658,  0.0489], device='mps:0')
+Traceback (most recent call last):
+  File "/Users/vincent.lordier/Work/SMPLest-X/main/inference.py", line 160, in <module>
+    main()
+  File "/Users/vincent.lordier/Work/SMPLest-X/main/inference.py", line 138, in main
+    out = demoer.model(inputs, targets, meta_info, 'test')
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/vincent.lordier/Work/SMPLest-X/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/vincent.lordier/Work/SMPLest-X/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/vincent.lordier/Work/SMPLest-X/.venv/lib/python3.12/site-packages/torch/nn/parallel/data_parallel.py", line 174, in forward
+    return self.module(*inputs, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/vincent.lordier/Work/SMPLest-X/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/vincent.lordier/Work/SMPLest-X/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/vincent.lordier/Work/SMPLest-X/models/SMPLest_X.py", line 209, in forward
+    joint_proj, joint_cam, joint_cam_wo_ra, mesh_cam, pred_root_cam = self.get_coord(root_pose_aa, body_pose_aa, lhand_pose_aa, 
+                                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/vincent.lordier/Work/SMPLest-X/models/SMPLest_X.py", line 71, in get_coord
+    output = self.smplx_layer(betas=shape, body_pose=body_pose, global_orient=root_pose, right_hand_pose=rhand_pose,
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/vincent.lordier/Work/SMPLest-X/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/vincent.lordier/Work/SMPLest-X/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/vincent.lordier/Work/SMPLest-X/.venv/lib/python3.12/site-packages/smplx/body_models.py", line 1231, in forward
+    vertices, joints = lbs(shape_components, full_pose, self.v_template,
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/vincent.lordier/Work/SMPLest-X/.venv/lib/python3.12/site-packages/smplx/lbs.py", line 205, in lbs
+    v_shaped = v_template + blend_shapes(betas, shapedirs)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/vincent.lordier/Work/SMPLest-X/.venv/lib/python3.12/site-packages/smplx/lbs.py", line 291, in blend_shapes
+    blend_shape = torch.einsum('bl,mkl->bmk', [betas, shape_disps])
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/vincent.lordier/Work/SMPLest-X/.venv/lib/python3.12/site-packages/torch/functional.py", line 417, in einsum
+    return einsum(equation, *_operands)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/vincent.lordier/Work/SMPLest-X/.venv/lib/python3.12/site-packages/torch/functional.py", line 422, in einsum
+    return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: einsum(): subscript l has size 10 for operand 1 which does not broadcast with previously seen size 20
+[1;33m⚠️[0m ⚠️ Inference completed with errors but checking for partial results...
+[0;31m❌[0m Inference failed and no output frames generated
+[1;33m⚠️[0m Check the output above for error details
+[1;33m⚠️[0m Common fixes:
+[1;33m⚠️[0m   - Ensure model files are downloaded: python download_weights.py
+[1;33m⚠️[0m   - Check SMPL model files in human_models/human_model_files/
+[1;33m⚠️[0m   - Try with PYTORCH_ENABLE_MPS_FALLBACK=1

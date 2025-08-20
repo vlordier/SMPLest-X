@@ -1,0 +1,38 @@
+[0;34mℹ️[0m 🤖 SMPLest-X Inference for Mac
+[0;34mℹ️[0m Model: smplest_x_h, File: 1349093_720p.mp4, FPS: 30
+= assets configs data datasets debug_output.log debug_output2.log demo download_weights.py human_models humandata_prep LICENSE.txt main models outputs pretrained_models README.md requirements.txt scripts utils 50
+[0;32m✅[0m Environment configured for Mac
+[0;34mℹ️[0m Running pre-flight checks...
+[0;32m✅[0m Pre-flight checks passed
+[0;32m✅[0m Created working directories
+[0;34mℹ️[0m Converting video to frames...
+[0;32m✅[0m Extracted 955 frames
+[0;34mℹ️[0m Running SMPLest-X inference...
+[92m08-20 12:09:46[0m Using 1 GPU.
+[92m08-20 12:09:46[0m Inference [1349093_720p] with [./pretrained_models/smplest_x_h/smplest_x_h.pth.tar].
+[92m08-20 12:09:46[0m Load checkpoint from ./pretrained_models/smplest_x_h/smplest_x_h.pth.tar
+[92m08-20 12:09:46[0m Creating graph...
+[92m08-20 12:09:51[0m [93mWRN: Attention: Strict=False is set for checkpoint loading. Please check manually.[0m
+❌ OpenGL setup failed completely: ('Unable to load EGL library', "dlopen(EGL, 0x000A): tried: 'EGL' (no such file), '/System/Volumes/Preboot/Cryptexes/OSEGL' (no such file), '/opt/homebrew/lib/EGL' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/lib/EGL' (no such file), '/opt/homebrew/lib/EGL' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/lib/EGL' (no such file), '/usr/lib/EGL' (no such file, not in dyld cache), 'EGL' (no such file)", 'EGL', None)
+WARNING: You are using a SMPL-X model, with only 10 shape coefficients.
+WARNING: You are using a SMPL-X model, with only 10 shape and 10 expression coefficients.
+DEBUG: Initial NEUTRAL shapedirs shape: torch.Size([10475, 3, 10])
+WARNING: You are using a SMPL-X model, with only 10 shape coefficients.
+WARNING: You are using a SMPL-X model, with only 10 shape and 10 expression coefficients.
+DEBUG: Initial MALE shapedirs shape: torch.Size([10475, 3, 10])
+WARNING: You are using a SMPL-X model, with only 10 shape coefficients.
+WARNING: You are using a SMPL-X model, with only 10 shape and 10 expression coefficients.
+DEBUG: Initial FEMALE shapedirs shape: torch.Size([10475, 3, 10])
+WARNING: You are using a SMPL-X model, with only 10 shape coefficients.
+WARNING: You are using a SMPL-X model, with only 10 shape and 10 expression coefficients.
+DEBUG: Initial NEUTRAL shapedirs shape: torch.Size([10475, 3, 10])
+WARNING: You are using a SMPL-X model, with only 10 shape coefficients.
+WARNING: You are using a SMPL-X model, with only 10 shape and 10 expression coefficients.
+DEBUG: Initial MALE shapedirs shape: torch.Size([10475, 3, 10])
+WARNING: You are using a SMPL-X model, with only 10 shape coefficients.
+WARNING: You are using a SMPL-X model, with only 10 shape and 10 expression coefficients.
+DEBUG: Initial FEMALE shapedirs shape: torch.Size([10475, 3, 10])
+DEBUG: Original shapedirs shape: torch.Size([10475, 3, 10])
+Total #parameters: 687223152 (0.69B)
+  0%|          | 0/955 [00:00<?, ?it/s]/opt/homebrew/Cellar/python@3.12/3.12.11/Frameworks/Python.framework/Versions/3.12/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

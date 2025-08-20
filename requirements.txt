@@ -10,3 +10,4 @@ einops==0.8.1
 timm==1.0.14
 ultralytics==8.3.75
 pyopengl
+pytorch3d
