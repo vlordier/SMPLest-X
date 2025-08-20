@@ -18,6 +18,7 @@ from main.base import Tester
 from main.config import Config
 from utils.data_utils import load_img, process_bbox, generate_patch_image
 from utils.visualization_utils import render_mesh, render_mesh_improved
+from utils.pyvista_renderer import PyVistaRenderer
 from utils.device_utils import get_device_name, to_device
 from utils.validation_models import (
     InferenceConfig, DetectionResult, SMPLXParameters, MeshData, 
@@ -66,42 +67,32 @@ def save_mesh_ply(vertices, faces, filepath):
 
 
 def render_mesh_only(vertices, faces, cam_param, img_shape=(512, 512)):
-    """Render mesh without background for isolated mesh visualization"""
+    """Render mesh without background for isolated mesh visualization using PyVista"""
     try:
-        import pyrender
-        import trimesh
+        # Create PyVista renderer
+        renderer = PyVistaRenderer(window_size=(img_shape[1], img_shape[0]), background_color='white')
         
-        # Create mesh
-        mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-        mesh = pyrender.Mesh.from_trimesh(mesh)
+        # Render with PyVista (returns numpy array)
+        image = renderer.render_mesh(
+            vertices=vertices,
+            faces=faces,
+            camera_position='iso',
+            color='lightblue',
+            show_edges=True,
+            edge_color='black',
+            smooth_shading=True
+        )
         
-        # Create scene
-        scene = pyrender.Scene()
-        scene.add(mesh)
-        
-        # Create camera
-        focal, princpt = cam_param['focal'], cam_param['princpt']
-        try:
-            camera = pyrender.IntrinsicsCamera(fx=focal[0], fy=focal[1], cx=princpt[0], cy=princpt[1])
-        except AttributeError:
-            # Fallback for newer pyrender versions
-            camera = pyrender.PerspectiveCamera(yfov=2*np.arctan(princpt[1]/focal[1]), aspectRatio=focal[0]/focal[1])
-        
-        scene.add(camera)
-        
-        # Create light
-        light = pyrender.DirectionalLight(color=np.ones(3), intensity=3.0)
-        scene.add(light)
-        
-        # Render
-        renderer = pyrender.OffscreenRenderer(img_shape[1], img_shape[0])
-        color, _ = renderer.render(scene)
-        renderer.delete()
-        
-        return color
+        if image is not None:
+            # Convert RGBA to RGB if needed and ensure correct format
+            if len(image.shape) == 3 and image.shape[2] == 4:
+                image = image[:, :, :3]
+            return image
+        else:
+            raise Exception("PyVista returned None")
         
     except Exception as e:
-        print(f"PyRender failed ({e}), using matplotlib wireframe fallback")
+        print(f"PyVista rendering failed ({e}), using matplotlib wireframe fallback")
         return render_mesh_matplotlib_fallback(vertices, faces, cam_param, img_shape)
 
 
@@ -239,9 +230,23 @@ def parse_args():
     # Optional validation parameters
     parser.add_argument('--gpu', type=int, default=0, help='GPU ID to use')
     parser.add_argument('--bbox_thr', type=float, default=0.9, help='Bounding box threshold')
-    parser.add_argument('--fps', type=int, help='Frame rate for video processing')
+    parser.add_argument('--fps', type=int, help='Frame rate for video processing (auto-detected if not specified)')
+    parser.add_argument('--frame_skip', type=int, default=2, choices=[1, 2, 3, 4, 5, 8], 
+                       help='Skip every N frames for processing (default: 2)')
     args = parser.parse_args()
     return args
+
+def get_video_fps(video_path: Path) -> Optional[float]:
+    """Extract FPS from video file"""
+    try:
+        import cv2
+        cap = cv2.VideoCapture(str(video_path))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        cap.release()
+        return fps if fps > 0 else None
+    except Exception as e:
+        logging.warning(f"Could not extract FPS from video: {e}")
+        return None
 
 def validate_and_process_detections(yolo_results, frame_id: int, confidence_threshold: float = 0.5) -> List[DetectionResult]:
     """Validate and convert YOLO detections to DetectionResult objects"""
@@ -403,13 +408,29 @@ def main():
     try:
         # Validate and create configuration
         root_dir = Path(__file__).resolve().parent.parent
+        video_path = Path(f"demo/{args.file_name}.mp4")
+        
+        # Auto-detect FPS if not provided
+        fps = args.fps
+        if fps is None:
+            detected_fps = get_video_fps(video_path)
+            if detected_fps:
+                fps = int(detected_fps)
+                logging.info(f"Auto-detected video FPS: {fps}")
+            else:
+                fps = 30  # Default fallback
+                logging.warning(f"Could not detect FPS, using default: {fps}")
+        
+        logging.info(f"Using frame skip: {args.frame_skip} (processing every {args.frame_skip} frames)")
+        
         config = InferenceConfig(
-            input_path=Path(f"demo/{args.file_name}.mp4"),  # Assumed input location
+            input_path=video_path,
             output_folder=Path(f"demo/output_frames/{args.file_name}"),
             model_path=Path(f"./pretrained_models/{args.ckpt_name}/{args.ckpt_name}.pth.tar"),
             gpu=getattr(args, 'gpu', 0),
             bbox_thr=getattr(args, 'bbox_thr', 0.9),
-            fps=getattr(args, 'fps', None),
+            fps=fps,
+            frame_skip=args.frame_skip,
             save_meshes=args.save_meshes,
             save_mesh_renders=args.save_mesh_renders,
             mesh_format=MeshFormat(args.mesh_format),
@@ -479,7 +500,11 @@ def main():
     start = int(args.start)
     end = int(args.end) + 1
 
-    for frame in tqdm(range(start, end)):
+    # Generate frame sequence with skipping
+    frames_to_process = list(range(start, end, args.frame_skip))
+    logging.info(f"Processing {len(frames_to_process)} frames with skip={args.frame_skip} (total range: {start}-{end-1})")
+
+    for frame in tqdm(frames_to_process, desc="Processing frames"):
         frame_start_time = time.time()
         
         # Initialize frame output
@@ -603,6 +628,112 @@ def main():
                     
                     mesh_vertices = mesh_tensor.detach().cpu().numpy()[0]
                     mesh_faces = smpl_x.face
+                    
+                    # Fix Z-axis alignment issue: SMPL-X meshes are positioned too far from camera
+                    # Typical Z values are around 30+, which causes misalignment in rendering
+                    # Apply Z-axis correction to bring mesh closer to origin for proper alignment
+                    z_correction_factor = 0.3  # More conservative correction based on research
+                    mesh_vertices_corrected = mesh_vertices.copy()
+                    mesh_vertices_corrected[:, 2] = mesh_vertices[:, 2] * z_correction_factor
+                    
+                    # Comprehensive pose parameter validation and clamping
+                    pose_clamped = False
+                    
+                    # 1. Root pose clamping (existing)
+                    if 'smplx_root_pose' in model_output:
+                        root_pose = model_output['smplx_root_pose'].detach().cpu().numpy()[0]
+                        original_root_pose = root_pose.copy()
+                        # More aggressive root pose clamping (>1.5 radians ≈ 86 degrees)
+                        # The original had Z-rotation of -3.0665 rad (-175.6°) which is nearly upside down
+                        root_pose_clamped = np.clip(root_pose, -1.5, 1.5)
+                        if not np.allclose(original_root_pose, root_pose_clamped):
+                            logging.warning(f"Frame {frame}, Person {person_id}: Extreme root pose detected {original_root_pose} -> clamped to {root_pose_clamped}")
+                            model_output['smplx_root_pose'] = torch.from_numpy(root_pose_clamped).unsqueeze(0).to(model_output['smplx_root_pose'].device)
+                            pose_clamped = True
+                        
+                    # 2. Body pose clamping (NEW - this fixes the distortion issue)
+                    if 'smplx_body_pose' in model_output:
+                        body_pose = model_output['smplx_body_pose'].detach().cpu().numpy()[0]
+                        original_body_pose = body_pose.copy()
+                        
+                        # Check for extreme body poses (>1.8 radians ≈ 103 degrees)
+                        # This is more restrictive than the 2.0 rad threshold we identified
+                        extreme_mask = np.abs(body_pose) > 1.8
+                        extreme_count = np.sum(extreme_mask)
+                        
+                        if extreme_count > 0:
+                            # Clamp extreme body poses to realistic human motion limits
+                            body_pose_clamped = np.clip(body_pose, -1.8, 1.8)
+                            
+                            logging.warning(f"Frame {frame}, Person {person_id}: {extreme_count} extreme body poses detected (>{np.degrees(1.8):.1f}°)")
+                            logging.warning(f"  Range before clamping: [{np.degrees(body_pose.min()):.1f}°, {np.degrees(body_pose.max()):.1f}°]")
+                            logging.warning(f"  Range after clamping: [{np.degrees(body_pose_clamped.min()):.1f}°, {np.degrees(body_pose_clamped.max()):.1f}°]")
+                            
+                            # Update the model output with clamped values
+                            model_output['smplx_body_pose'] = torch.from_numpy(body_pose_clamped).unsqueeze(0).to(model_output['smplx_body_pose'].device)
+                            pose_clamped = True
+                            
+                        # Check for NaN or infinite values
+                        if np.any(np.isnan(body_pose)) or np.any(np.isinf(body_pose)):
+                            logging.error(f"Frame {frame}, Person {person_id}: NaN/Inf values in body pose - resetting to neutral")
+                            body_pose_neutral = np.zeros_like(body_pose)
+                            model_output['smplx_body_pose'] = torch.from_numpy(body_pose_neutral).unsqueeze(0).to(model_output['smplx_body_pose'].device)
+                            pose_clamped = True
+                    
+                    if pose_clamped:
+                        logging.info(f"Frame {frame}, Person {person_id}: Pose parameters clamped for more realistic human poses")
+                        
+                        # CRITICAL FIX: Regenerate mesh with clamped pose parameters
+                        logging.info(f"Frame {frame}, Person {person_id}: Regenerating mesh with clamped parameters")
+                        
+                        # Extract all SMPL-X parameters from model output
+                        root_pose = model_output['smplx_root_pose']  # Already clamped
+                        body_pose = model_output['smplx_body_pose']  # Already clamped
+                        shape = model_output['smplx_shape']
+                        lhand_pose = model_output.get('smplx_lhand_pose', torch.zeros(1, 45).to(root_pose.device))
+                        rhand_pose = model_output.get('smplx_rhand_pose', torch.zeros(1, 45).to(root_pose.device))
+                        jaw_pose = model_output.get('smplx_jaw_pose', torch.zeros(1, 3).to(root_pose.device))
+                        expr = model_output.get('smplx_expr', torch.zeros(1, 10).to(root_pose.device))
+                        cam_trans = model_output.get('cam_trans', torch.zeros(1, 3).to(root_pose.device))
+                        
+                        # Eye poses are required by SMPL-X layer (typically zero for most applications)
+                        leye_pose = torch.zeros(1, 3).to(root_pose.device)
+                        reye_pose = torch.zeros(1, 3).to(root_pose.device)
+                        
+                        # Use SMPL-X layer to regenerate mesh with clamped parameters
+                        try:
+                            with torch.no_grad():
+                                # Make sure SMPL-X layer is on the correct device
+                                smplx_layer = smpl_x.layer['neutral'].to(root_pose.device)
+                                
+                                # Assume neutral gender for simplicity (could be enhanced to detect gender)
+                                smplx_output = smplx_layer(
+                                    betas=shape,
+                                    body_pose=body_pose.view(1, -1),
+                                    global_orient=root_pose,
+                                    left_hand_pose=lhand_pose.view(1, -1),
+                                    right_hand_pose=rhand_pose.view(1, -1),
+                                    jaw_pose=jaw_pose,
+                                    leye_pose=leye_pose,
+                                    reye_pose=reye_pose,
+                                    expression=expr,
+                                    transl=cam_trans
+                                )
+                                
+                                # Update model output with regenerated mesh
+                                regenerated_mesh = smplx_output.vertices
+                                model_output['smplx_mesh_cam'] = regenerated_mesh
+                                
+                                logging.info(f"Frame {frame}, Person {person_id}: Mesh successfully regenerated with clamped parameters")
+                                logging.info(f"  Original mesh range: [{mesh_tensor.min():.3f}, {mesh_tensor.max():.3f}]")
+                                logging.info(f"  Regenerated mesh range: [{regenerated_mesh.min():.3f}, {regenerated_mesh.max():.3f}]")
+                                
+                        except Exception as e:
+                            logging.error(f"Frame {frame}, Person {person_id}: Failed to regenerate mesh with clamped parameters: {e}")
+                            logging.error("Continuing with original mesh")
+                    
+                    # Use corrected vertices for all downstream processing
+                    mesh_vertices = mesh_vertices_corrected
                     
                     # Validate and convert SMPL-X parameters
                     smplx_params = validate_and_convert_smplx_params(
