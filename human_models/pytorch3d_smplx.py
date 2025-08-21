@@ -64,12 +64,15 @@ class Direct_SMPLX:
                 model_data = pickle.load(f, encoding='latin1')
             
             # Convert to tensors and move to device
+            # Extract parent information from kintree_table
+            parents = model_data['kintree_table'][0]  # First row contains parent indices
+            
             model = {
                 'v_template': to_device(torch.from_numpy(model_data['v_template']).float()),
                 'shapedirs': to_device(torch.from_numpy(model_data['shapedirs']).float()),
                 'posedirs': to_device(torch.from_numpy(model_data['posedirs']).float()),
                 'J_regressor': to_device(torch.from_numpy(model_data['J_regressor']).float()),
-                'parents': torch.from_numpy(model_data['parents']).long(),
+                'parents': to_device(torch.from_numpy(parents).long()),
                 'weights': to_device(torch.from_numpy(model_data['weights']).float()),
                 'faces': torch.from_numpy(model_data['f']).long()
             }

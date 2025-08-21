@@ -25,8 +25,8 @@ class Model(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
 
-        # loss
-        self.smplx_layer = to_device(copy.deepcopy(self.smpl_x.layer['neutral']))
+        # loss - for Direct_SMPLX, we use the instance itself
+        self.smplx_layer = self.smpl_x
         self.coord_loss = CoordLoss()
         self.param_loss = ParamLoss()
 
@@ -58,10 +58,10 @@ class Model(nn.Module):
         zero_pose = to_device(torch.zeros((1, 3)).float().repeat(batch_size, 1))  # eye poses
         
         # Use Direct SMPLX forward pass (no coefficient mismatch issues)
-        output = self.smplx_layer(betas=shape, body_pose=body_pose, global_orient=root_pose, 
-                                  right_hand_pose=rhand_pose, transl=cam_trans, 
-                                  left_hand_pose=lhand_pose, jaw_pose=jaw_pose, 
-                                  leye_pose=zero_pose, reye_pose=zero_pose, expression=expr)
+        output = self.smplx_layer.forward(betas=shape, body_pose=body_pose, global_orient=root_pose, 
+                                          right_hand_pose=rhand_pose, transl=cam_trans, 
+                                          left_hand_pose=lhand_pose, jaw_pose=jaw_pose, 
+                                          leye_pose=zero_pose, reye_pose=zero_pose, expression=expr)
         # camera-centered 3D coordinate
         mesh_cam = output.vertices
         if mode == 'test' and self.cfg.data.testset in ['AGORA_test', 'BEDLAM_test']:  # use 144 joints for AGORA evaluation

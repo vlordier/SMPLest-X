@@ -26,6 +26,7 @@ from main.base import Tester
 from main.config import Config
 from utils.data_utils import load_img, process_bbox, generate_patch_image
 from utils.inference_utils import non_max_suppression
+from utils.device_utils import get_device, to_device
 
 def load_vposer_model():
     """Load VPoser model for pose regularization"""
@@ -217,8 +218,9 @@ def main():
         total_frames += 1
         
         # detection, xyxy
+        device = get_device()
         yolo_bbox = detector.predict(original_img, 
-                                device='cuda' if torch.cuda.is_available() else 'cpu', 
+                                device=device.type, 
                                 classes=0, 
                                 conf=cfg.inference.detection.conf, 
                                 save=cfg.inference.detection.save, 
@@ -258,7 +260,7 @@ def main():
                                                 out_shape=cfg.model.input_img_shape)
                 
             img = transform(img.astype(np.float32))/255
-            img = img.cuda()[None,:,:,:] if torch.cuda.is_available() else img[None,:,:,:]
+            img = to_device(img[None,:,:,:], get_device())
             inputs = {'img': img}
             targets = {}
             meta_info = {}
@@ -310,6 +312,9 @@ def main():
                 
                 # Blend mesh overlay with original image
                 alpha = 0.7
+                # Ensure both images have the same dtype for blending
+                vis_img = vis_img.astype(np.uint8)
+                mesh_overlay = mesh_overlay.astype(np.uint8)
                 vis_img = cv2.addWeighted(vis_img, alpha, mesh_overlay, 1-alpha, 0)
                 
             except Exception as e:
