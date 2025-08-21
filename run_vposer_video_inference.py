@@ -85,36 +85,82 @@ def transform_vertices_to_original_image(vertices, inv_trans, img_shape):
     
     return original_coords[:, :2]  # Return only x, y coordinates
 
-def simple_mesh_render(vertices, faces, img_shape, focal_length=(5000, 5000), princpt=None):
-    """Corrected mesh rendering with optimal coordinate transformation"""
+def simple_mesh_render(vertices, faces, img_shape, focal_length=(5000, 5000), princpt=None, bbox=None):
+    """Fixed mesh rendering with proper coordinate transformation and scaling"""
     try:
         # Convert vertices to numpy if needed
         if hasattr(vertices, 'cpu'):
             vertices = vertices.cpu().numpy()
         
-        # CRITICAL FIX: SMPL-X uses different coordinate system
-        # Need to flip Y coordinate to convert from 3D graphics to computer vision coords
-        vertices_corrected = vertices.copy()
-        vertices_corrected[:, 1] = -vertices_corrected[:, 1]  # Flip Y axis
-        vertices_corrected[:, 2] = np.maximum(vertices_corrected[:, 2], 0.01)
+        # Use bbox center as the principal point for proper alignment
+        if bbox is not None:
+            # bbox is in xyxy format
+            bbox_center_x = (bbox[0] + bbox[2]) / 2
+            bbox_center_y = (bbox[1] + bbox[3]) / 2
+            bbox_width = bbox[2] - bbox[0]
+            bbox_height = bbox[3] - bbox[1]
+            princpt_corrected = (bbox_center_x, bbox_center_y)
+        else:
+            # Fallback to image center
+            princpt_corrected = (img_shape[1] / 2, img_shape[0] / 2)
+            bbox_height = img_shape[0]
+            bbox_width = img_shape[1]
         
-        # Get model input shape for scaling
-        model_input_shape = (512, 384)  # From config
+        # COMPLETE COORDINATE SYSTEM FIX:
+        # 1. SMPL-X coordinate system: Y-up, Z-forward (right-handed)
+        # 2. Image coordinate system: Y-down, Z-into-screen
+        # 3. Need to rotate 180 degrees around X-axis to flip both Y and Z
+        vertices_cam = vertices.copy()
         
-        # Scale focal length and principal point to original image
-        scale_x = img_shape[1] / model_input_shape[1]  # width scaling
-        scale_y = img_shape[0] / model_input_shape[0]  # height scaling
-        focal_scaled = (focal_length[0] * scale_x, focal_length[1] * scale_y)
+        # Apply 180-degree rotation around X-axis: Y' = -Y, Z' = -Z
+        vertices_cam[:, 1] = -vertices_cam[:, 1]  # Flip Y (up/down)
+        vertices_cam[:, 2] = -vertices_cam[:, 2]  # Flip Z (depth direction)
         
-        if princpt is None:
-            princpt = (model_input_shape[1] / 2, model_input_shape[0] / 2)  # Default model center
+        # CRITICAL SCALING AND POSITIONING FIX
+        # First center the mesh around its own center of mass
+        mesh_center = vertices_cam.mean(axis=0)
+        vertices_centered = vertices_cam - mesh_center
         
-        princpt_scaled = (princpt[0] * scale_x, princpt[1] * scale_y)
+        # Scale the mesh to fit within the bounding box
+        if bbox is not None:
+            # Target scale: fit mesh within ~60% of bbox dimensions for better fit
+            bbox_scale = min(bbox_width, bbox_height) * 0.3  # More conservative scaling
+            
+            # Current mesh scale (standard deviation as a measure of spread)
+            mesh_scale = np.std(vertices_centered[:, :2])  # XY spread
+            if mesh_scale > 0:
+                scale_factor = bbox_scale / (mesh_scale * 1000)  # Scale down significantly
+                vertices_centered *= scale_factor
         
-        # Apply perspective projection with scaled parameters
-        vertices_2d = np.zeros_like(vertices_corrected)
-        vertices_2d[:, 0] = vertices_corrected[:, 0] * focal_scaled[0] / vertices_corrected[:, 2] + princpt_scaled[0]
-        vertices_2d[:, 1] = vertices_corrected[:, 1] * focal_scaled[1] / vertices_corrected[:, 2] + princpt_scaled[1]
+        # Position the mesh to align with the person's center within the bbox
+        # The mesh should be positioned so its 2D projection centers on the bbox center
+        vertices_cam = vertices_centered.copy()
+        
+        # Set consistent depth for all vertices
+        base_depth = 3.0  # 3 meters from camera
+        vertices_cam[:, 2] = vertices_centered[:, 2] + base_depth
+        vertices_cam[:, 2] = np.maximum(vertices_cam[:, 2], 1.0)  # Minimum 1m depth
+        
+        # Use consistent focal length - don't modify based on bbox
+        effective_focal = focal_length
+        
+        # Calculate where the mesh center would project to
+        mesh_center_2d_x = 0 * effective_focal[0] / base_depth + (img_shape[1] / 2)  # Image center initially
+        mesh_center_2d_y = 0 * effective_focal[1] / base_depth + (img_shape[0] / 2)  # Image center initially
+        
+        # Calculate offset needed to center mesh in bbox
+        if bbox is not None:
+            offset_x = (princpt_corrected[0] - mesh_center_2d_x) * base_depth / effective_focal[0]
+            offset_y = (princpt_corrected[1] - mesh_center_2d_y) * base_depth / effective_focal[1]
+            
+            # Apply the offset to position mesh center at bbox center
+            vertices_cam[:, 0] += offset_x
+            vertices_cam[:, 1] += offset_y
+        
+        # Project to 2D
+        vertices_2d = np.zeros_like(vertices_cam)
+        vertices_2d[:, 0] = vertices_cam[:, 0] * effective_focal[0] / vertices_cam[:, 2] + (img_shape[1] / 2)
+        vertices_2d[:, 1] = vertices_cam[:, 1] * effective_focal[1] / vertices_cam[:, 2] + (img_shape[0] / 2)
         
         # Convert to integer image coordinates
         x_img = np.round(vertices_2d[:, 0]).astype(int)
@@ -124,7 +170,7 @@ def simple_mesh_render(vertices, faces, img_shape, focal_length=(5000, 5000), pr
         mesh_img = np.zeros((img_shape[0], img_shape[1], 3), dtype=np.uint8)
         
         # Only render points that are in front of camera and within image bounds
-        z_cam = vertices[:, 2]
+        z_cam = vertices_cam[:, 2]
         valid_mask = (
             (z_cam > 0) & 
             (x_img >= 0) & (x_img < img_shape[1]) & 
@@ -154,6 +200,54 @@ def simple_mesh_render(vertices, faces, img_shape, focal_length=(5000, 5000), pr
     except Exception as e:
         print(f"Mesh rendering failed: {e}")
         return np.zeros((img_shape[0], img_shape[1], 3), dtype=np.uint8)
+
+def generate_properly_posed_mesh(smpl_x, model_output, device):
+    """
+    Generate properly posed mesh using estimated pose parameters
+    """
+    # Extract all required parameters
+    body_pose = model_output['smplx_body_pose']
+    global_orient = model_output['smplx_root_pose']
+    left_hand_pose = model_output.get('smplx_lhand_pose', torch.zeros(1, 45, device=device))
+    right_hand_pose = model_output.get('smplx_rhand_pose', torch.zeros(1, 45, device=device))
+    jaw_pose = model_output.get('smplx_jaw_pose', torch.zeros(1, 3, device=device))
+    leye_pose = torch.zeros(1, 3, device=device)  # Default eye poses
+    reye_pose = torch.zeros(1, 3, device=device)
+    betas = model_output.get('smplx_shape', torch.zeros(1, 10, device=device))
+    expression = model_output.get('smplx_expr', torch.zeros(1, 10, device=device))
+    transl = model_output.get('cam_trans', torch.zeros(1, 3, device=device))
+    
+    # CRITICAL FIX: Apply coordinate system correction to pose parameters
+    # Flip the Y-axis rotation components in body pose
+    corrected_body_pose = body_pose.clone()
+    for i in range(0, 63, 3):  # Every 3rd element starting from 0
+        if i + 1 < 63:  # Ensure we don't go out of bounds
+            corrected_body_pose[:, i + 1] = -corrected_body_pose[:, i + 1]  # Flip Y rotation
+    
+    # Also flip the global orientation Y component
+    corrected_global_orient = global_orient.clone()
+    corrected_global_orient[:, 1] = -corrected_global_orient[:, 1]  # Flip Y rotation
+    
+    # Use the SMPL-X layer to generate posed mesh
+    smplx_layer = smpl_x.layer['neutral'].to(device)
+    
+    with torch.no_grad():
+        output = smplx_layer(
+            betas=betas,
+            body_pose=corrected_body_pose,
+            global_orient=corrected_global_orient,
+            left_hand_pose=left_hand_pose,
+            right_hand_pose=right_hand_pose,
+            jaw_pose=jaw_pose,
+            leye_pose=leye_pose,
+            reye_pose=reye_pose,
+            expression=expression,
+            transl=transl,
+            return_verts=True,
+            return_full_pose=True
+        )
+    
+    return output.vertices.detach().cpu().numpy()[0]
 
 def apply_vposer_regularization(vposer_model, body_pose, regularization_strength=0.6):
     """Apply VPoser pose regularization"""
@@ -367,7 +461,12 @@ def main():
                     else:
                         extreme_angles_after.append(extreme_before)
 
-            mesh = out['smplx_mesh_cam'].detach().cpu().numpy()[0]
+            # Generate properly posed mesh instead of using T-pose mesh
+            try:
+                mesh = generate_properly_posed_mesh(smpl_x, out, get_device())
+            except Exception as e:
+                print(f"⚠️ Failed to generate posed mesh: {e}, using T-pose mesh")
+                mesh = out['smplx_mesh_cam'].detach().cpu().numpy()[0]
 
             # Improved mesh rendering with camera parameters
             try:
@@ -375,11 +474,12 @@ def main():
                 focal_length = cfg.model.focal
                 princpt = cfg.model.princpt
                 
-                # Render mesh overlay with optimal coordinate transformation
+                # Render mesh overlay with bbox-centered coordinate transformation
                 mesh_overlay = simple_mesh_render(
                     mesh, smpl_x.face, vis_img.shape, 
                     focal_length=focal_length, 
-                    princpt=princpt
+                    princpt=princpt,
+                    bbox=yolo_bbox[bbox_id]  # Pass the detection bbox
                 )
                 
                 # Blend mesh overlay with original image
