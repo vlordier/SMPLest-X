@@ -207,7 +207,8 @@ class Tester(Base):
         # prepare network
         self.logger.info("Creating graph...")
         model = get_model(self.cfg, 'test')
-        model = DataParallel(model).cuda()
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        model = DataParallel(model).to(device)
 
         ckpt = torch.load(self.cfg.model.pretrained_model_path, map_location=torch.device('cpu'))
 
@@ -221,7 +222,8 @@ class Tester(Base):
             new_state_dict[k] = v
         self.logger.warning("Attention: Strict=False is set for checkpoint loading. Please check manually.")
         model.load_state_dict(new_state_dict, strict=False)
-        model.cuda()
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        model.to(device)
         model.eval()
 
         self.model = model

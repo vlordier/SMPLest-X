@@ -193,11 +193,11 @@ def download_vposer_model(download_dir: str = './data/vposer_v1_0') -> str:
     """
     # Note: This would require implementation of download logic
     # For now, user needs to manually download from SMPL-X website
-    vposer_ckpt_dir = os.path.join(download_dir, 'snapshots')
+    vposer_ckpt_dir = download_dir  # VPoser expects the main directory, not snapshots subdir
     
-    if not os.path.exists(vposer_ckpt_dir):
+    if not os.path.exists(os.path.join(vposer_ckpt_dir, 'snapshots')):
         raise FileNotFoundError(
-            f"VPoser model not found at {vposer_ckpt_dir}. "
+            f"VPoser model not found at {vposer_ckpt_dir}/snapshots. "
             "Please download VPoser model from https://smpl-x.is.tue.mpg.de/ "
             "and extract to the specified directory."
         )
@@ -222,7 +222,7 @@ def create_vposer_wrapper(vposer_ckpt_dir: Optional[str] = None,
         return None
         
     if vposer_ckpt_dir is None:
-        vposer_ckpt_dir = './data/vposer_v1_0/snapshots'
+        vposer_ckpt_dir = './data/vposer_v1_0'
         
     try:
         return VPoserWrapper(vposer_ckpt_dir, device)

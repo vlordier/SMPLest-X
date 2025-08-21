@@ -9,6 +9,10 @@ import cv2
 import datetime
 from tqdm import tqdm
 from pathlib import Path
+import sys
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from human_models.human_models import SMPLX
 from ultralytics import YOLO
 from main.base import Tester
