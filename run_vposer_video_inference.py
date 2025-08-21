@@ -85,46 +85,38 @@ def transform_vertices_to_original_image(vertices, inv_trans, img_shape):
     
     return original_coords[:, :2]  # Return only x, y coordinates
 
-def simple_mesh_render(vertices, faces, img_shape, focal_length=(5000, 5000), princpt=None, inv_trans=None):
-    """Corrected mesh rendering with proper coordinate transformation"""
+def simple_mesh_render(vertices, faces, img_shape, focal_length=(5000, 5000), princpt=None):
+    """Corrected mesh rendering with optimal coordinate transformation"""
     try:
         # Convert vertices to numpy if needed
         if hasattr(vertices, 'cpu'):
             vertices = vertices.cpu().numpy()
         
-        if inv_trans is not None:
-            # Use proper coordinate transformation from patch space to original image
-            vertices_2d = transform_vertices_to_original_image(vertices, inv_trans, img_shape)
-            x_img = np.round(vertices_2d[:, 0]).astype(int)
-            y_img = np.round(vertices_2d[:, 1]).astype(int)
-        else:
-            # Fallback to the previous method if no inverse transformation available
-            # The principal point from config is for the model's virtual coordinate system
-            # We need to scale it to the actual image size
-            if princpt is None:
-                # Default to image center
-                princpt = (img_shape[1] / 2, img_shape[0] / 2)
-            else:
-                # Scale principal point from model coordinates to image coordinates
-                # Model uses (192/2, 256/2) = (96, 128) for input shape (512, 384)
-                # We need to scale this to actual image dimensions
-                scale_x = img_shape[1] / 192  # Scale to image width
-                scale_y = img_shape[0] / 256  # Scale to image height
-                princpt = (princpt[0] * scale_x, princpt[1] * scale_y)
-            
-            # Apply perspective projection following utils/visualization_utils.py approach
-            vertices_2d = vertices.copy()
-            
-            # Avoid division by zero
-            vertices_2d[:, 2] = np.maximum(vertices_2d[:, 2], 0.01)
-            
-            # Standard perspective projection
-            vertices_2d[:, 0] = vertices_2d[:, 0] * focal_length[0] / vertices_2d[:, 2] + princpt[0]
-            vertices_2d[:, 1] = vertices_2d[:, 1] * focal_length[1] / vertices_2d[:, 2] + princpt[1]
-            
-            # Convert to image coordinates
-            x_img = np.round(vertices_2d[:, 0]).astype(int)
-            y_img = np.round(vertices_2d[:, 1]).astype(int)
+        # Use the "Direct to Original" method which showed the best alignment
+        # Scale focal length and principal point directly to original image coordinates
+        vertices_2d = vertices.copy()
+        vertices_2d[:, 2] = np.maximum(vertices_2d[:, 2], 0.01)
+        
+        # Get model input shape for scaling
+        model_input_shape = (512, 384)  # From config
+        
+        # Scale focal length and principal point to original image
+        scale_x = img_shape[1] / model_input_shape[1]  # width scaling
+        scale_y = img_shape[0] / model_input_shape[0]  # height scaling
+        focal_scaled = (focal_length[0] * scale_x, focal_length[1] * scale_y)
+        
+        if princpt is None:
+            princpt = (model_input_shape[1] / 2, model_input_shape[0] / 2)  # Default model center
+        
+        princpt_scaled = (princpt[0] * scale_x, princpt[1] * scale_y)
+        
+        # Apply perspective projection with scaled parameters
+        vertices_2d[:, 0] = vertices_2d[:, 0] * focal_scaled[0] / vertices_2d[:, 2] + princpt_scaled[0]
+        vertices_2d[:, 1] = vertices_2d[:, 1] * focal_scaled[1] / vertices_2d[:, 2] + princpt_scaled[1]
+        
+        # Convert to integer image coordinates
+        x_img = np.round(vertices_2d[:, 0]).astype(int)
+        y_img = np.round(vertices_2d[:, 1]).astype(int)
         
         # Create mesh visualization
         mesh_img = np.zeros((img_shape[0], img_shape[1], 3), dtype=np.uint8)
@@ -381,12 +373,11 @@ def main():
                 focal_length = cfg.model.focal
                 princpt = cfg.model.princpt
                 
-                # Render mesh overlay with proper coordinate transformation
+                # Render mesh overlay with optimal coordinate transformation
                 mesh_overlay = simple_mesh_render(
                     mesh, smpl_x.face, vis_img.shape, 
                     focal_length=focal_length, 
-                    princpt=princpt,
-                    inv_trans=inv_trans
+                    princpt=princpt
                 )
                 
                 # Blend mesh overlay with original image
