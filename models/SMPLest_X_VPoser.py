@@ -16,6 +16,7 @@ from human_models.human_models import SMPL, SMPLX
 from utils.transforms import rot6d_to_axis_angle, batch_rodrigues, rot6d_to_rotmat
 from utils.data_utils import load_img
 from utils.vposer_utils import create_vposer_wrapper, VPoserLoss
+from utils.device_utils import to_device, get_device
 
 
 class ModelWithVPoser(nn.Module):
@@ -34,7 +35,7 @@ class ModelWithVPoser(nn.Module):
         self.decoder = decoder
 
         # loss
-        self.smplx_layer = copy.deepcopy(self.smpl_x.layer['neutral']).cuda()
+        self.smplx_layer = to_device(copy.deepcopy(self.smpl_x.layer['neutral']))
         self.coord_loss = CoordLoss()
         self.param_loss = ParamLoss()
 
@@ -65,7 +66,8 @@ class ModelWithVPoser(nn.Module):
         """Initialize VPoser components"""
         try:
             vposer_ckpt_dir = getattr(self.cfg.model, 'vposer_ckpt_dir', './data/vposer_v1_0/snapshots')
-            self.vposer_wrapper = create_vposer_wrapper(vposer_ckpt_dir, 'cuda')
+            device = get_device()
+            self.vposer_wrapper = create_vposer_wrapper(vposer_ckpt_dir, device.type)
             
             if self.vposer_wrapper:
                 self.vposer_loss = VPoserLoss(self.vposer_wrapper)
@@ -214,8 +216,8 @@ class ModelWithVPoser(nn.Module):
         """
         hand_global_rotmat = []
         for item in rot_mat:
-            parents = torch.tensor([-1,  0,  0,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  9,  9, 12, 13, 14,
-                16, 17, 18, 19], dtype=torch.int64)
+            parents = to_device(torch.tensor([-1,  0,  0,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  9,  9, 12, 13, 14,
+                16, 17, 18, 19], dtype=torch.int64), item.device)
             transforms_mat = item.clone()
             transform_chain = [transforms_mat[0].detach()] # pelvis
             

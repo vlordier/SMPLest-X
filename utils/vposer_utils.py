@@ -9,6 +9,7 @@ import numpy as np
 import os
 import logging
 from typing import Dict, Optional, Tuple
+from .device_utils import to_device
 
 try:
     from human_body_prior.tools.model_loader import load_model
@@ -50,7 +51,7 @@ class VPoserWrapper(nn.Module):
                 remove_words_in_model_weights='vp_model.',
                 disable_grad=True
             )
-            self.vposer = self.vposer.to(self.device)
+            self.vposer = to_device(self.vposer, self.device)
             self.vposer.eval()
             logging.info(f"VPoser model loaded from {self.vposer_ckpt_dir}")
             
@@ -96,7 +97,7 @@ class VPoserWrapper(nn.Module):
             body_pose: Sampled SMPL body pose parameters [batch_size, 63]
         """
         # Sample from standard normal distribution
-        pose_latent = torch.randn(batch_size, self.latent_dim).to(self.device)
+        pose_latent = to_device(torch.randn(batch_size, self.latent_dim), self.device)
         return self.decode_pose(pose_latent)
     
     def compute_pose_prior_loss(self, pose_latent: torch.Tensor, 

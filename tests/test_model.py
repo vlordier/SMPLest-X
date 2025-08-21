@@ -412,14 +412,16 @@ class TestModelValidation:
         assert output_cpu['smplx_mesh_cam'].device.type == 'cpu'
         
         # Test GPU if available
-        if torch.cuda.is_available():
-            model_gpu = model.cuda()
-            inputs_gpu = {'img': torch.randn(1, 3, 512, 384).cuda()}
+        from utils.device_utils import get_device, to_device
+        device = get_device()
+        if device.type != 'cpu':
+            model_gpu = to_device(model)
+            inputs_gpu = {'img': to_device(torch.randn(1, 3, 512, 384))}
             
             with torch.no_grad():
                 output_gpu = model_gpu(inputs_gpu, {}, {}, mode='test')
                 
-            assert output_gpu['smplx_mesh_cam'].device.type == 'cuda'
+            assert output_gpu['smplx_mesh_cam'].device.type == device.type
 
 
 class TestModelIntegration:

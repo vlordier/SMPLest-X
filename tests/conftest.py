@@ -6,6 +6,7 @@ import pytest
 import torch
 import sys
 from pathlib import Path
+from utils.device_utils import get_device
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
@@ -33,12 +34,7 @@ def setup_test_environment():
 @pytest.fixture
 def device():
     """Return the best available device"""
-    if torch.cuda.is_available():
-        return torch.device('cuda')
-    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-        return torch.device('mps')
-    else:
-        return torch.device('cpu')
+    return get_device()
 
 @pytest.fixture
 def batch_sizes():

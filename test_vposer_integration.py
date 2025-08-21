@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from utils.vposer_utils import create_vposer_wrapper, VPoserLoss
 from utils.pytorch3d_renderer import create_pytorch3d_renderer
 from human_models.human_models import SMPLX
+from utils.device_utils import get_device, to_device
 
 
 def test_vposer_functionality():

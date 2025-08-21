@@ -137,8 +137,8 @@ class Model(nn.Module):
         """
         hand_global_rotmat = []
         for item in rot_mat:
-            parents = torch.tensor([-1,  0,  0,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  9,  9, 12, 13, 14,
-                16, 17, 18, 19], dtype=torch.int64)
+            parents = to_device(torch.tensor([-1,  0,  0,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  9,  9, 12, 13, 14,
+                16, 17, 18, 19], dtype=torch.int64), item.device)
             transforms_mat = item.clone()
             transform_chain = [transforms_mat[0].detach()] # pelvis
             
