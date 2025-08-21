@@ -82,16 +82,20 @@ class ModelWithVPoser(nn.Module):
         # camera translation
         t_xy = cam_param[:, :2]
         gamma = torch.sigmoid(cam_param[:, 2])  # apply sigmoid to make it positive
+        # Use device from input tensor for k_value calculation
+        device = cam_param.device
         k_value = torch.FloatTensor([math.sqrt(self.cfg.model.focal[0] * self.cfg.model.focal[1] * 
                             self.cfg.model.camera_3d_size * self.cfg.model.camera_3d_size / (
-                self.cfg.model.input_body_shape[0] * self.cfg.model.input_body_shape[1]))]).cuda().view(-1)
+                self.cfg.model.input_body_shape[0] * self.cfg.model.input_body_shape[1]))]).to(device).view(-1)
         t_z = k_value * gamma
         cam_trans = torch.cat((t_xy, t_z[:, None]), 1)
         return cam_trans
 
     def get_coord(self, root_pose, body_pose, lhand_pose, rhand_pose, jaw_pose, shape, expr, cam_trans, mode):
         batch_size = root_pose.shape[0]
-        zero_pose = torch.zeros((1, 3)).float().cuda().repeat(batch_size, 1)  # eye poses
+        # Use device from input tensor for eye poses
+        device = root_pose.device
+        zero_pose = torch.zeros((1, 3)).float().to(device).repeat(batch_size, 1)  # eye poses
         # transl=cam_trans, 
         output = self.smplx_layer(betas=shape, body_pose=body_pose, global_orient=root_pose, right_hand_pose=rhand_pose,
                                   transl=cam_trans, left_hand_pose=lhand_pose, jaw_pose=jaw_pose, leye_pose=zero_pose,

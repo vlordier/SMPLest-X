@@ -142,7 +142,8 @@ def create_overlay_frames(
 
 def main():
     # Configuration
-    project_dir = Path("/Users/vincent.lordier/Work/SMPLest-X")
+    # Get project directory from script location
+    project_dir = Path(__file__).parent.resolve()
     video_name = "1349093_720p"
     
     # Paths

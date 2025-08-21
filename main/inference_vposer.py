@@ -378,10 +378,139 @@ class VPoserInferenceRunner(InferenceRunner):
         Returns:
             results: List of detection/estimation results
         """
-        # This would contain the actual inference logic
-        # For now, return placeholder
-        logging.debug(f"Processing frame {frame_idx} with VPoser regularization {vposer_regularization}")
-        return []
+        import torch
+        import numpy as np
+        from utils.human_models import smpl_x
+        from utils.preprocessing import process_bbox, generate_patch_image, non_max_suppression
+        from torchvision import transforms as T
+        
+        results = []
+        
+        try:
+            # Person detection using YOLO
+            yolo_bbox = self.yolo_model(frame)
+            
+            if len(yolo_bbox) == 0:
+                logging.debug(f"Frame {frame_idx}: No persons detected")
+                return results
+            
+            # Apply NMS if multi-person
+            if self.multi_person:
+                yolo_bbox = non_max_suppression(yolo_bbox, self.iou_threshold)
+            else:
+                yolo_bbox = yolo_bbox[:1]  # Only largest bbox
+            
+            original_img_height, original_img_width = frame.shape[:2]
+            
+            # Process each detected person
+            for bbox_id, bbox_xyxy in enumerate(yolo_bbox):
+                # Convert YOLO bbox to xywh format
+                yolo_bbox_xywh = np.array([
+                    bbox_xyxy[0],  # x
+                    bbox_xyxy[1],  # y 
+                    abs(bbox_xyxy[2] - bbox_xyxy[0]),  # width
+                    abs(bbox_xyxy[3] - bbox_xyxy[1])   # height
+                ])
+                
+                # Process bbox for model input
+                bbox = process_bbox(
+                    bbox=yolo_bbox_xywh,
+                    img_width=original_img_width,
+                    img_height=original_img_height,
+                    input_img_shape=self.input_img_shape,
+                    ratio=1.25
+                )
+                
+                # Generate patch image
+                img, _, _ = generate_patch_image(
+                    cvimg=frame,
+                    bbox=bbox,
+                    scale=1.0,
+                    rot=0.0,
+                    do_flip=False,
+                    out_shape=self.input_img_shape
+                )
+                
+                # Transform and normalize
+                transform = T.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225]
+                )
+                
+                img_tensor = torch.from_numpy(img.astype(np.float32)).permute(2, 0, 1) / 255.0
+                img_tensor = transform(img_tensor).unsqueeze(0)
+                
+                # Move to device
+                device = next(self.model.parameters()).device
+                img_tensor = img_tensor.to(device)
+                
+                # Model inference
+                inputs = {'img': img_tensor}
+                targets = {}
+                meta_info = {}
+                
+                with torch.no_grad():
+                    out = self.model(inputs, targets, meta_info, 'test')
+                
+                # Apply VPoser regularization if available and enabled
+                if self.vposer_model is not None and vposer_regularization > 0:
+                    try:
+                        # Get body pose from output
+                        if 'body_pose' in out:
+                            original_pose = out['body_pose']
+                            
+                            # Apply VPoser regularization
+                            regularized_pose = self.apply_vposer_regularization(
+                                original_pose, vposer_regularization
+                            )
+                            
+                            # Update the output with regularized pose
+                            out['body_pose'] = regularized_pose
+                            
+                            # Re-generate mesh with regularized pose if needed
+                            if hasattr(self, 'regenerate_mesh_from_pose'):
+                                out['smplx_mesh_cam'] = self.regenerate_mesh_from_pose(out)
+                    
+                    except Exception as e:
+                        logging.warning(f"VPoser regularization failed for person {bbox_id}: {e}")
+                
+                # Extract mesh
+                if 'smplx_mesh_cam' in out:
+                    mesh = out['smplx_mesh_cam'].detach().cpu().numpy()[0]
+                    
+                    # Calculate camera parameters for rendering
+                    focal = [
+                        self.focal[0] / self.input_body_shape[1] * bbox[2],
+                        self.focal[1] / self.input_body_shape[0] * bbox[3]
+                    ]
+                    princpt = [
+                        self.princpt[0] / self.input_body_shape[1] * bbox[2] + bbox[0],
+                        self.princpt[1] / self.input_body_shape[0] * bbox[3] + bbox[1]
+                    ]
+                    
+                    # Store results
+                    result = {
+                        'person_id': bbox_id,
+                        'bbox': bbox,
+                        'smplx_mesh_cam': mesh,
+                        'focal': focal,
+                        'princpt': princpt,
+                        'frame_idx': frame_idx,
+                        'vposer_applied': self.vposer_model is not None and vposer_regularization > 0
+                    }
+                    
+                    # Add additional outputs if available
+                    for key in ['body_pose', 'global_orient', 'betas', 'expression', 'left_hand_pose', 'right_hand_pose']:
+                        if key in out:
+                            result[key] = out[key].detach().cpu().numpy()
+                    
+                    results.append(result)
+                    logging.debug(f"Frame {frame_idx}: Processed person {bbox_id}")
+                
+        except Exception as e:
+            logging.error(f"Frame {frame_idx} processing failed: {e}")
+        
+        return results
 
 
 def main():

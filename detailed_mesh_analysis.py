@@ -10,7 +10,8 @@ import sys
 def analyze_mesh_sample():
     """Analyze a sample of meshes in detail"""
     
-    project_dir = Path("/Users/vincent.lordier/Work/SMPLest-X")
+    # Get project directory from script location
+    project_dir = Path(__file__).parent.resolve()
     mesh_dir = project_dir / "demo" / "output_meshes" / "1349093_720p"
     
     ply_files = sorted(list(mesh_dir.glob("*.ply")))[:10]  # First 10 files

@@ -11,7 +11,8 @@ einops==0.8.1
 timm==1.0.14
 ultralytics==8.3.75
 pyopengl
-# VPoser and PyTorch3D dependencies
-git+https://github.com/nghorbani/configer
-git+https://github.com/nghorbani/human_body_prior
-pytorch3d
+# VPoser dependencies with pinned commit hashes for reproducible builds
+git+https://github.com/nghorbani/configer@8cd1e3e556d9697298907800a743e120be57ac36
+git+https://github.com/nghorbani/human_body_prior@4c246d8a83ce16d3cff9c79dcf04d81fa440a6bc
+# PyTorch3D (optional - VPoser uses PyTorch-native SO(3) conversions)
+# pytorch3d
