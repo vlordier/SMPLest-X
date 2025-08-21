@@ -59,36 +59,63 @@ def load_vposer_model():
         print("  Proceeding without VPoser regularization...")
         return None
 
-def simple_mesh_render(vertices, faces, img_shape):
-    """Simple mesh rendering using basic projection"""
+def simple_mesh_render(vertices, faces, img_shape, focal_length=(5000, 5000), princpt=None):
+    """Improved mesh rendering with proper camera projection"""
     try:
-        # Simple orthographic projection for basic visualization
-        # This is a fallback when pyrender/pyvista are not available
+        if princpt is None:
+            princpt = (img_shape[1] // 2, img_shape[0] // 2)
         
-        # Project 3D points to 2D
-        x_coords = vertices[:, 0]
-        y_coords = vertices[:, 1]
+        # Convert vertices to numpy if needed
+        if hasattr(vertices, 'cpu'):
+            vertices = vertices.cpu().numpy()
         
-        # Normalize coordinates to image space
-        x_norm = (x_coords - x_coords.min()) / (x_coords.max() - x_coords.min())
-        y_norm = (y_coords - y_coords.min()) / (y_coords.max() - y_coords.min())
+        # Apply perspective projection with camera intrinsics
+        # Vertices are in camera coordinates (X, Y, Z)
+        x_cam, y_cam, z_cam = vertices[:, 0], vertices[:, 1], vertices[:, 2]
         
-        # Scale to image dimensions
-        x_img = (x_norm * img_shape[1] * 0.8 + img_shape[1] * 0.1).astype(int)
-        y_img = (y_norm * img_shape[0] * 0.8 + img_shape[0] * 0.1).astype(int)
+        # Avoid division by zero
+        z_cam = np.maximum(z_cam, 0.01)
         
-        # Create simple point cloud visualization
+        # Project to 2D using camera intrinsics
+        x_2d = (x_cam / z_cam) * focal_length[0] + princpt[0]
+        y_2d = (y_cam / z_cam) * focal_length[1] + princpt[1]
+        
+        # Convert to image coordinates
+        x_img = np.round(x_2d).astype(int)
+        y_img = np.round(y_2d).astype(int)
+        
+        # Create mesh visualization
         mesh_img = np.zeros((img_shape[0], img_shape[1], 3), dtype=np.uint8)
         
-        # Draw vertices as points
-        for i in range(len(x_img)):
-            if 0 <= x_img[i] < img_shape[1] and 0 <= y_img[i] < img_shape[0]:
-                mesh_img[y_img[i], x_img[i]] = [0, 255, 0]  # Green points
+        # Only render points that are in front of camera and within image bounds
+        valid_mask = (
+            (z_cam > 0) & 
+            (x_img >= 0) & (x_img < img_shape[1]) & 
+            (y_img >= 0) & (y_img < img_shape[0])
+        )
+        
+        # Color points based on depth (closer = brighter green)
+        if np.any(valid_mask):
+            valid_x = x_img[valid_mask]
+            valid_y = y_img[valid_mask]
+            valid_z = z_cam[valid_mask]
+            
+            # Normalize depth for coloring
+            z_min, z_max = valid_z.min(), valid_z.max()
+            if z_max > z_min:
+                depth_norm = (valid_z - z_min) / (z_max - z_min)
+            else:
+                depth_norm = np.ones_like(valid_z)
+            
+            # Render points with depth-based intensity
+            for i in range(len(valid_x)):
+                intensity = int(255 * (1.0 - depth_norm[i] * 0.5))  # Closer = brighter
+                mesh_img[valid_y[i], valid_x[i]] = [0, intensity, 0]  # Green with varying intensity
         
         return mesh_img
         
     except Exception as e:
-        print(f"Simple rendering failed: {e}")
+        print(f"Mesh rendering failed: {e}")
         return np.zeros((img_shape[0], img_shape[1], 3), dtype=np.uint8)
 
 def apply_vposer_regularization(vposer_model, body_pose, regularization_strength=0.6):
@@ -305,13 +332,21 @@ def main():
 
             mesh = out['smplx_mesh_cam'].detach().cpu().numpy()[0]
 
-            # Simple mesh rendering (fallback)
+            # Improved mesh rendering with camera parameters
             try:
-                # Try to use simple mesh overlay
-                mesh_overlay = simple_mesh_render(mesh, smpl_x.face, vis_img.shape)
+                # Get camera parameters from config
+                focal_length = cfg.model.focal
+                princpt = cfg.model.princpt
+                
+                # Render mesh overlay with proper projection
+                mesh_overlay = simple_mesh_render(
+                    mesh, smpl_x.face, vis_img.shape, 
+                    focal_length=focal_length, 
+                    princpt=princpt
+                )
                 
                 # Blend mesh overlay with original image
-                alpha = 0.7
+                alpha = 0.6  # Slightly more transparent to see both image and mesh
                 # Ensure both images have the same dtype for blending
                 vis_img = vis_img.astype(np.uint8)
                 mesh_overlay = mesh_overlay.astype(np.uint8)
@@ -319,6 +354,7 @@ def main():
                 
             except Exception as e:
                 print(f"⚠️ Mesh rendering failed: {e}")
+                # Continue without mesh overlay
             
             # draw the bbox on img
             vis_img = cv2.rectangle(vis_img, (int(yolo_bbox[bbox_id][0]), int(yolo_bbox[bbox_id][1])), 
