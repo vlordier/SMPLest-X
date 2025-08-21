@@ -1,12 +1,42 @@
-"""
-Device utility functions for optimal hardware selection
-"""
+"""Device utility functions for cross-platform compatibility and VPoser integration."""
 
 import torch
 
+
+def get_device():
+    """
+    Get the best available device for PyTorch operations.
+    
+    Returns:
+        torch.device: The best available device (MPS on Mac, CUDA on GPU machines, CPU otherwise)
+    """
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        return torch.device('mps')
+    else:
+        return torch.device('cpu')
+
+
+def to_device(tensor_or_model, device=None):
+    """
+    Move tensor or model to the specified device.
+    
+    Args:
+        tensor_or_model: Tensor or model to move
+        device: Target device (if None, uses get_device())
+        
+    Returns:
+        Tensor or model moved to the target device
+    """
+    if device is None:
+        device = get_device()
+    return tensor_or_model.to(device)
+
+
 def get_optimal_device(prefer_gpu=True, verbose=False):
     """
-    Get the best available device with intelligent selection
+    Get the best available device with intelligent selection (VPoser-compatible)
     
     Args:
         prefer_gpu (bool): Whether to prefer GPU over CPU for small workloads
@@ -51,6 +81,7 @@ def get_optimal_device(prefer_gpu=True, verbose=False):
     
     return device
 
+
 def get_device_for_workload(batch_size=1, model_size='small'):
     """
     Get optimal device based on workload characteristics
@@ -77,6 +108,7 @@ def get_device_for_workload(batch_size=1, model_size='small'):
     
     return 'cpu'
 
+
 def create_device_adaptive_tensor(data, target_device=None):
     """
     Create tensor on optimal device
@@ -96,6 +128,25 @@ def create_device_adaptive_tensor(data, target_device=None):
     else:
         return torch.tensor(data).to(target_device)
 
+
+def is_cuda_available():
+    """Check if CUDA is available."""
+    return torch.cuda.is_available()
+
+
+def is_mps_available():
+    """Check if MPS is available."""
+    return torch.backends.mps.is_available()
+
+
+def synchronize():
+    """Synchronize the current device."""
+    if torch.cuda.is_available() and torch.cuda.current_device() >= 0:
+        torch.cuda.synchronize()
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        torch.mps.synchronize()
+
+
 def synchronize_device(device):
     """Synchronize operations on the specified device"""
     if device == 'cuda':
@@ -103,6 +154,38 @@ def synchronize_device(device):
     elif device == 'mps':
         if hasattr(torch, 'mps'):
             torch.mps.synchronize()
+
+
+def empty_cache():
+    """Empty the cache for the current device."""
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+
+
+def get_device_count():
+    """Get the number of available devices."""
+    if torch.cuda.is_available():
+        return torch.cuda.device_count()
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        return 1  # MPS typically has one device
+    else:
+        return 1  # CPU
+
+
+def set_device(device_id):
+    """Set the current device."""
+    if torch.cuda.is_available():
+        torch.cuda.set_device(device_id)
+    # MPS doesn't need explicit device setting
+
+
+def get_device_name():
+    """Get a string representation of the current device."""
+    device = get_device()
+    return device.type
+
 
 def get_device_info():
     """Get information about available devices"""

@@ -7,14 +7,18 @@ import copy
 from models.module import TransformerDecoderHead, ViT
 from models.loss import CoordLoss, ParamLoss
 from human_models.human_models import SMPL, SMPLX
+from human_models.pytorch3d_smplx import Direct_SMPLX
 from utils.transforms import rot6d_to_axis_angle, batch_rodrigues, rot6d_to_rotmat
 from utils.data_utils import load_img
+from utils.device_utils import get_device, to_device
 
 
 class Model(nn.Module):
     def __init__(self, config, encoder, decoder):
         super(Model, self).__init__()
-        self.smpl_x = SMPLX.get_instance()
+        # Use Direct SMPLX to bypass coefficient mismatch issues
+        Direct_SMPLX.reset_instance()
+        self.smpl_x = Direct_SMPLX(config.model.human_model_path)
         
         # network
         self.cfg = config
@@ -22,8 +26,7 @@ class Model(nn.Module):
         self.decoder = decoder
 
         # loss
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.smplx_layer = copy.deepcopy(self.smpl_x.layer['neutral']).to(device)
+        self.smplx_layer = to_device(copy.deepcopy(self.smpl_x.layer['neutral']))
         self.coord_loss = CoordLoss()
         self.param_loss = ParamLoss()
 
@@ -43,22 +46,22 @@ class Model(nn.Module):
         # camera translation
         t_xy = cam_param[:, :2]
         gamma = torch.sigmoid(cam_param[:, 2])  # apply sigmoid to make it positive
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        k_value = torch.FloatTensor([math.sqrt(self.cfg.model.focal[0] * self.cfg.model.focal[1] * 
+        k_value = to_device(torch.FloatTensor([math.sqrt(self.cfg.model.focal[0] * self.cfg.model.focal[1] * 
                             self.cfg.model.camera_3d_size * self.cfg.model.camera_3d_size / (
-                self.cfg.model.input_body_shape[0] * self.cfg.model.input_body_shape[1]))]).to(device).view(-1)
+                self.cfg.model.input_body_shape[0] * self.cfg.model.input_body_shape[1]))]).view(-1))
         t_z = k_value * gamma
         cam_trans = torch.cat((t_xy, t_z[:, None]), 1)
         return cam_trans
 
     def get_coord(self, root_pose, body_pose, lhand_pose, rhand_pose, jaw_pose, shape, expr, cam_trans, mode):
         batch_size = root_pose.shape[0]
-        device = root_pose.device
-        zero_pose = torch.zeros((1, 3)).float().to(device).repeat(batch_size, 1)  # eye poses
-        # transl=cam_trans, 
-        output = self.smplx_layer(betas=shape, body_pose=body_pose, global_orient=root_pose, right_hand_pose=rhand_pose,
-                                  transl=cam_trans, left_hand_pose=lhand_pose, jaw_pose=jaw_pose, leye_pose=zero_pose,
-                                  reye_pose=zero_pose, expression=expr)
+        zero_pose = to_device(torch.zeros((1, 3)).float().repeat(batch_size, 1))  # eye poses
+        
+        # Use Direct SMPLX forward pass (no coefficient mismatch issues)
+        output = self.smplx_layer(betas=shape, body_pose=body_pose, global_orient=root_pose, 
+                                  right_hand_pose=rhand_pose, transl=cam_trans, 
+                                  left_hand_pose=lhand_pose, jaw_pose=jaw_pose, 
+                                  leye_pose=zero_pose, reye_pose=zero_pose, expression=expr)
         # camera-centered 3D coordinate
         mesh_cam = output.vertices
         if mode == 'test' and self.cfg.data.testset in ['AGORA_test', 'BEDLAM_test']:  # use 144 joints for AGORA evaluation

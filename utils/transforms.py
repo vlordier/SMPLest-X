@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from torch.nn import functional as F
 from einops.einops import rearrange
+from utils.device_utils import to_device
 
 
 def cam2pixel(cam_coord, f, c):
@@ -234,8 +235,7 @@ def rot6d_to_axis_angle(x):
     b3 = torch.cross(b1, b2)
     rot_mat = torch.stack((b1, b2, b3), dim=-1)  # 3x3 rotation matrix
 
-    device = rot_mat.device
-    rot_mat = torch.cat([rot_mat, torch.zeros((batch_size, 3, 1)).to(device).float()], 2)  # 3x4 rotation matrix
+    rot_mat = torch.cat([rot_mat, to_device(torch.zeros((batch_size, 3, 1)).float())], 2)  # 3x4 rotation matrix
     axis_angle = rotation_matrix_to_angle_axis(rot_mat).reshape(-1, 3)  # axis-angle 
     axis_angle[torch.isnan(axis_angle)] = 0.0
     return axis_angle
@@ -334,10 +334,8 @@ def soft_argmax_2d(heatmap2d):
     accu_x = heatmap2d.sum(dim=(2))
     accu_y = heatmap2d.sum(dim=(3))
 
-    # Use device from input tensor
-    device = heatmap2d.device
-    accu_x = accu_x * torch.arange(width).float().to(device)[None, None, :]
-    accu_y = accu_y * torch.arange(height).float().to(device)[None, None, :]
+    accu_x = accu_x * to_device(torch.arange(width).float())[None, None, :]
+    accu_y = accu_y * to_device(torch.arange(height).float())[None, None, :]
 
     accu_x = accu_x.sum(dim=2, keepdim=True)
     accu_y = accu_y.sum(dim=2, keepdim=True)
@@ -357,11 +355,9 @@ def soft_argmax_3d(heatmap3d):
     accu_y = heatmap3d.sum(dim=(2, 4))
     accu_z = heatmap3d.sum(dim=(3, 4))
 
-    # Use device from input tensor
-    device = heatmap3d.device
-    accu_x = accu_x * torch.arange(width).float().to(device)[None, None, :]
-    accu_y = accu_y * torch.arange(height).float().to(device)[None, None, :]
-    accu_z = accu_z * torch.arange(depth).float().to(device)[None, None, :]
+    accu_x = accu_x * to_device(torch.arange(width).float())[None, None, :]
+    accu_y = accu_y * to_device(torch.arange(height).float())[None, None, :]
+    accu_z = accu_z * to_device(torch.arange(depth).float())[None, None, :]
 
     accu_x = accu_x.sum(dim=2, keepdim=True)
     accu_y = accu_y.sum(dim=2, keepdim=True)
