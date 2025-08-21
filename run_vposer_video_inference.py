@@ -59,35 +59,78 @@ def load_vposer_model():
         print("  Proceeding without VPoser regularization...")
         return None
 
-def simple_mesh_render(vertices, faces, img_shape, focal_length=(5000, 5000), princpt=None):
-    """Improved mesh rendering with proper camera projection"""
+def transform_vertices_to_original_image(vertices, inv_trans, img_shape):
+    """Transform vertices from patch coordinate system back to original image coordinates"""
+    vertices_2d = vertices.copy()
+    
+    # Project 3D points to 2D first (in patch coordinates)
+    # Avoid division by zero
+    vertices_2d[:, 2] = np.maximum(vertices_2d[:, 2], 0.01)
+    
+    # Get focal length and principal point for patch coordinates
+    # These are typically set for the model's input image shape
+    focal_patch = (5000, 5000)  # Model's virtual focal length
+    princpt_patch = (192 / 2, 256 / 2)  # Model's virtual principal point
+    
+    # Project to 2D in patch coordinate system
+    vertices_2d[:, 0] = vertices_2d[:, 0] * focal_patch[0] / vertices_2d[:, 2] + princpt_patch[0]
+    vertices_2d[:, 1] = vertices_2d[:, 1] * focal_patch[1] / vertices_2d[:, 2] + princpt_patch[1]
+    
+    # Now transform from patch coordinates back to original image coordinates
+    # Add homogeneous coordinate (z=1) for affine transformation
+    patch_coords = np.hstack([vertices_2d[:, :2], np.ones((len(vertices_2d), 1))])
+    
+    # Apply inverse transformation: original_coords = inv_trans @ patch_coords
+    original_coords = np.dot(inv_trans, patch_coords.T).T
+    
+    return original_coords[:, :2]  # Return only x, y coordinates
+
+def simple_mesh_render(vertices, faces, img_shape, focal_length=(5000, 5000), princpt=None, inv_trans=None):
+    """Corrected mesh rendering with proper coordinate transformation"""
     try:
-        if princpt is None:
-            princpt = (img_shape[1] // 2, img_shape[0] // 2)
-        
         # Convert vertices to numpy if needed
         if hasattr(vertices, 'cpu'):
             vertices = vertices.cpu().numpy()
         
-        # Apply perspective projection with camera intrinsics
-        # Vertices are in camera coordinates (X, Y, Z)
-        x_cam, y_cam, z_cam = vertices[:, 0], vertices[:, 1], vertices[:, 2]
-        
-        # Avoid division by zero
-        z_cam = np.maximum(z_cam, 0.01)
-        
-        # Project to 2D using camera intrinsics
-        x_2d = (x_cam / z_cam) * focal_length[0] + princpt[0]
-        y_2d = (y_cam / z_cam) * focal_length[1] + princpt[1]
-        
-        # Convert to image coordinates
-        x_img = np.round(x_2d).astype(int)
-        y_img = np.round(y_2d).astype(int)
+        if inv_trans is not None:
+            # Use proper coordinate transformation from patch space to original image
+            vertices_2d = transform_vertices_to_original_image(vertices, inv_trans, img_shape)
+            x_img = np.round(vertices_2d[:, 0]).astype(int)
+            y_img = np.round(vertices_2d[:, 1]).astype(int)
+        else:
+            # Fallback to the previous method if no inverse transformation available
+            # The principal point from config is for the model's virtual coordinate system
+            # We need to scale it to the actual image size
+            if princpt is None:
+                # Default to image center
+                princpt = (img_shape[1] / 2, img_shape[0] / 2)
+            else:
+                # Scale principal point from model coordinates to image coordinates
+                # Model uses (192/2, 256/2) = (96, 128) for input shape (512, 384)
+                # We need to scale this to actual image dimensions
+                scale_x = img_shape[1] / 192  # Scale to image width
+                scale_y = img_shape[0] / 256  # Scale to image height
+                princpt = (princpt[0] * scale_x, princpt[1] * scale_y)
+            
+            # Apply perspective projection following utils/visualization_utils.py approach
+            vertices_2d = vertices.copy()
+            
+            # Avoid division by zero
+            vertices_2d[:, 2] = np.maximum(vertices_2d[:, 2], 0.01)
+            
+            # Standard perspective projection
+            vertices_2d[:, 0] = vertices_2d[:, 0] * focal_length[0] / vertices_2d[:, 2] + princpt[0]
+            vertices_2d[:, 1] = vertices_2d[:, 1] * focal_length[1] / vertices_2d[:, 2] + princpt[1]
+            
+            # Convert to image coordinates
+            x_img = np.round(vertices_2d[:, 0]).astype(int)
+            y_img = np.round(vertices_2d[:, 1]).astype(int)
         
         # Create mesh visualization
         mesh_img = np.zeros((img_shape[0], img_shape[1], 3), dtype=np.uint8)
         
         # Only render points that are in front of camera and within image bounds
+        z_cam = vertices[:, 2]
         valid_mask = (
             (z_cam > 0) & 
             (x_img >= 0) & (x_img < img_shape[1]) & 
@@ -279,7 +322,7 @@ def main():
                                 img_height=original_img_height, 
                                 input_img_shape=cfg.model.input_img_shape, 
                                 ratio=getattr(cfg.data, "bbox_ratio", 1.25))                
-            img, _, _ = generate_patch_image(cvimg=original_img, 
+            img, trans, inv_trans = generate_patch_image(cvimg=original_img, 
                                                 bbox=bbox, 
                                                 scale=1.0, 
                                                 rot=0.0, 
@@ -338,11 +381,12 @@ def main():
                 focal_length = cfg.model.focal
                 princpt = cfg.model.princpt
                 
-                # Render mesh overlay with proper projection
+                # Render mesh overlay with proper coordinate transformation
                 mesh_overlay = simple_mesh_render(
                     mesh, smpl_x.face, vis_img.shape, 
                     focal_length=focal_length, 
-                    princpt=princpt
+                    princpt=princpt,
+                    inv_trans=inv_trans
                 )
                 
                 # Blend mesh overlay with original image
