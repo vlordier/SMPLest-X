@@ -1,0 +1,18 @@
+{
+  "video_info": {
+    "resolution": "960x1280",
+    "fps": 30.0,
+    "duration": 3.433333333333333,
+    "frames": 103
+  },
+  "processing": {
+    "baseline_frames": 101,
+    "vposer_frames": 101,
+    "success_rate": 100.0
+  },
+  "performance": {
+    "baseline_fps": 4.809523809523809,
+    "vposer_fps": 4.809523809523809,
+    "realtime_ratio": 16.03174603174603
+  }
+}
