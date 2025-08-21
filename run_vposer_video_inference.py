@@ -92,10 +92,11 @@ def simple_mesh_render(vertices, faces, img_shape, focal_length=(5000, 5000), pr
         if hasattr(vertices, 'cpu'):
             vertices = vertices.cpu().numpy()
         
-        # Use the "Direct to Original" method which showed the best alignment
-        # Scale focal length and principal point directly to original image coordinates
-        vertices_2d = vertices.copy()
-        vertices_2d[:, 2] = np.maximum(vertices_2d[:, 2], 0.01)
+        # CRITICAL FIX: SMPL-X uses different coordinate system
+        # Need to flip Y coordinate to convert from 3D graphics to computer vision coords
+        vertices_corrected = vertices.copy()
+        vertices_corrected[:, 1] = -vertices_corrected[:, 1]  # Flip Y axis
+        vertices_corrected[:, 2] = np.maximum(vertices_corrected[:, 2], 0.01)
         
         # Get model input shape for scaling
         model_input_shape = (512, 384)  # From config
@@ -111,8 +112,9 @@ def simple_mesh_render(vertices, faces, img_shape, focal_length=(5000, 5000), pr
         princpt_scaled = (princpt[0] * scale_x, princpt[1] * scale_y)
         
         # Apply perspective projection with scaled parameters
-        vertices_2d[:, 0] = vertices_2d[:, 0] * focal_scaled[0] / vertices_2d[:, 2] + princpt_scaled[0]
-        vertices_2d[:, 1] = vertices_2d[:, 1] * focal_scaled[1] / vertices_2d[:, 2] + princpt_scaled[1]
+        vertices_2d = np.zeros_like(vertices_corrected)
+        vertices_2d[:, 0] = vertices_corrected[:, 0] * focal_scaled[0] / vertices_corrected[:, 2] + princpt_scaled[0]
+        vertices_2d[:, 1] = vertices_corrected[:, 1] * focal_scaled[1] / vertices_corrected[:, 2] + princpt_scaled[1]
         
         # Convert to integer image coordinates
         x_img = np.round(vertices_2d[:, 0]).astype(int)
