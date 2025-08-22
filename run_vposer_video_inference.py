@@ -106,15 +106,8 @@ def simple_mesh_render(vertices, faces, img_shape, focal_length=(5000, 5000), pr
             bbox_height = img_shape[0]
             bbox_width = img_shape[1]
         
-        # COMPLETE COORDINATE SYSTEM FIX:
-        # 1. SMPL-X coordinate system: Y-up, Z-forward (right-handed)
-        # 2. Image coordinate system: Y-down, Z-into-screen
-        # 3. Need to rotate 180 degrees around X-axis to flip both Y and Z
+        # Use vertices as-is without coordinate transformations
         vertices_cam = vertices.copy()
-        
-        # Apply 180-degree rotation around X-axis: Y' = -Y, Z' = -Z
-        vertices_cam[:, 1] = -vertices_cam[:, 1]  # Flip Y (up/down)
-        vertices_cam[:, 2] = -vertices_cam[:, 2]  # Flip Z (depth direction)
         
         # CRITICAL SCALING AND POSITIONING FIX
         # First center the mesh around its own center of mass
@@ -217,16 +210,7 @@ def generate_properly_posed_mesh(smpl_x, model_output, device):
     expression = model_output.get('smplx_expr', torch.zeros(1, 10, device=device))
     transl = model_output.get('cam_trans', torch.zeros(1, 3, device=device))
     
-    # CRITICAL FIX: Apply coordinate system correction to pose parameters
-    # Flip the Y-axis rotation components in body pose
-    corrected_body_pose = body_pose.clone()
-    for i in range(0, 63, 3):  # Every 3rd element starting from 0
-        if i + 1 < 63:  # Ensure we don't go out of bounds
-            corrected_body_pose[:, i + 1] = -corrected_body_pose[:, i + 1]  # Flip Y rotation
-    
-    # Also flip the global orientation Y component
-    corrected_global_orient = global_orient.clone()
-    corrected_global_orient[:, 1] = -corrected_global_orient[:, 1]  # Flip Y rotation
+    # Use pose parameters as-is without coordinate transformations
     
     # Use the SMPL-X layer to generate posed mesh
     smplx_layer = smpl_x.layer['neutral'].to(device)
@@ -234,8 +218,8 @@ def generate_properly_posed_mesh(smpl_x, model_output, device):
     with torch.no_grad():
         output = smplx_layer(
             betas=betas,
-            body_pose=corrected_body_pose,
-            global_orient=corrected_global_orient,
+            body_pose=body_pose,
+            global_orient=global_orient,
             left_hand_pose=left_hand_pose,
             right_hand_pose=right_hand_pose,
             jaw_pose=jaw_pose,
