@@ -6,3 +6,23 @@ demo
 **/__pycache__
 **/.DS_Store
 **/human_model_files
+
+# Temporary files
+temp_file_list_*.txt
+*.tmp
+*.log
+
+# VPoser test outputs
+test_*.jpg
+test_*.png
+mesh_comparison_*.jpg
+pose_comparison_*.jpg
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS specific files
+Thumbs.db
